@@ -993,6 +993,49 @@ header {
   }
 }
 
+/* On a shorter desktop screen, preserve every control instead of clipping it. */
+@media (min-width: 980px) and (max-height: 1080px) {
+  body {
+    overflow-y: auto;
+  }
+  main {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+  .workspace {
+    flex: none;
+  }
+  .panel {
+    overflow: visible;
+  }
+}
+
+/* Keep labels and helper copy readable without changing the main visual hierarchy. */
+@media (min-width: 980px) {
+  .brand small,
+  .eyebrow,
+  .controls label,
+  .inspector > label,
+  .hint,
+  .printNote,
+  .legend,
+  .mapPicker p,
+  .projectActions button,
+  .projectLoad,
+  .areaAdjust button,
+  .mapSearch button,
+  .searchResults button {
+    font-size: 12px;
+  }
+  .tileTag {
+    font-size: 11px;
+  }
+  .mapAttribution {
+    font-size: 9px;
+  }
+}
+
 /* Overlap raster tiles slightly to eliminate occasional hairline seams. */
 .mapSurface img {
   width: 257px;

@@ -188,8 +188,11 @@ function terrainTriangles(
       supportOverride ??
       (terrainOnly ? Math.max(bounds.minZ, 0) + 1.2 : bounds.maxZ - 0.25),
     floor = terrainOnly ? support - 1.2 : support - 0.18;
+  // Raster elevation rows run north-to-south, while the printed model's
+  // positive Y direction is north. Reverse only the row inside this tile so
+  // every exported piece matches the map's north–south orientation.
   const at = (x: number, y: number) =>
-    values[(startY + y) * (GRID + 1) + startX + x];
+    values[(startY + (perTile - y)) * (GRID + 1) + startX + x];
   const point = (x: number, y: number, bottom = false) => [
     centerX - TILE_TOP_MM / 2 + (TILE_TOP_MM * x) / perTile,
     centerY - TILE_TOP_MM / 2 + (TILE_TOP_MM * y) / perTile,
@@ -276,7 +279,8 @@ function terrainBoardTriangles(
   const point = (x: number, y: number, bottom = false) => [
     bounds.minX + (width * x) / GRID,
     bounds.minY + (depth * y) / GRID,
-    bottom ? floor : support + values[y * (GRID + 1) + x] * relief,
+    // Same north–south correction as the individual terrain pieces.
+    bottom ? floor : support + values[(GRID - y) * (GRID + 1) + x] * relief,
   ];
   const tris: number[][] = [],
     add = (a: number[], b: number[], c: number[]) =>
@@ -791,8 +795,8 @@ export default function Home() {
     [placeholderIndex, setPlaceholderIndex] = useState(() =>
       flattestCorner(DEFAULT_ELEVATION),
     ),
-    [lat, setLat] = useState("30.81667"),
-    [lon, setLon] = useState("34.76667"),
+    [lat, setLat] = useState("30.85274"),
+    [lon, setLon] = useState("34.78200"),
     [span, setSpan] = useState("10"),
     [verticalModifier, setVerticalModifier] = useState("1"),
     [puzzleName, setPuzzleName] = useState("terrain-puzzle"),
@@ -1017,8 +1021,8 @@ export default function Home() {
       )
         throw new Error("This is not a valid Terrain Puzzle project file.");
       setPuzzleName(typeof saved.puzzleName === "string" ? saved.puzzleName : "terrain-puzzle");
-      setLat(typeof saved.lat === "string" ? saved.lat : "30.81667");
-      setLon(typeof saved.lon === "string" ? saved.lon : "34.76667");
+      setLat(typeof saved.lat === "string" ? saved.lat : "30.85274");
+      setLon(typeof saved.lon === "string" ? saved.lon : "34.78200");
       setSpan(typeof saved.span === "string" ? saved.span : "2");
       setVerticalModifier(
         typeof saved.verticalModifier === "string" ? saved.verticalModifier : "1",
@@ -1146,8 +1150,8 @@ export default function Home() {
           </div>
           <div className="mapMount">
             <MapPicker
-              latitude={Number(lat) || 30.81667}
-              longitude={Number(lon) || 34.76667}
+              latitude={Number(lat) || 30.85274}
+              longitude={Number(lon) || 34.78200}
               areaKm={Math.max(0.1, Number(span) || 10)}
               onPick={(nextLat, nextLon) => {
                 setLat(nextLat.toFixed(5));
