@@ -268,6 +268,21 @@ header {
   accent-color: var(--green);
   margin-top: 6px;
 }
+.areaAdjust {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 5px;
+  margin: -2px 0 10px;
+}
+.areaAdjust button {
+  border: 1px solid #b9cec8;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--deep);
+  padding: 7px 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
 .primary {
   width: 100%;
   background: var(--green);
@@ -420,6 +435,22 @@ header {
   border-radius: 3px;
   font-size: 8px;
   text-shadow: none;
+}
+.placeholderTag {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  color: #fff6cf;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 1px 3px #073f3c;
+}
+.tile.placeholder {
+  box-shadow:
+    0 0 0 2px #f1c45a,
+    0 4px 0 #0b423f,
+    0 9px 13px rgba(0, 0, 0, 0.13);
 }
 .status {
   display: flex;
@@ -791,6 +822,15 @@ header {
 .download.board {
   background: #e7b75e;
   color: #183c3a;
+}
+.placeholderToggle {
+  margin-top: 7px;
+  color: #6d4a00;
+  border-color: #e4bd54;
+  background: #fff9e6;
+}
+.baseShape.placeholderBase {
+  background: #e6bd48;
 }
 .download:disabled {
   opacity: 0.48;

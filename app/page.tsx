@@ -136,13 +136,16 @@ function terrainTriangles(
   bounds: Bounds,
   relief: number,
   terrainOnly: boolean,
+  supportOverride?: number,
 ) {
   const perTile = GRID / COLS,
     startX = col * perTile,
     startY = row * perTile,
     centerX = (bounds.minX + bounds.maxX) / 2,
     centerY = (bounds.minY + bounds.maxY) / 2,
-    support = terrainOnly ? Math.max(bounds.minZ, 0) + 1.2 : bounds.maxZ - 0.25,
+    support =
+      supportOverride ??
+      (terrainOnly ? Math.max(bounds.minZ, 0) + 1.2 : bounds.maxZ - 0.25),
     floor = terrainOnly ? support - 1.2 : support - 0.18;
   const at = (x: number, y: number) =>
     values[(startY + y) * (GRID + 1) + startX + x];
@@ -186,6 +189,36 @@ function terrainTriangles(
       }
     }
   return tris;
+}
+
+function terrainPeak(
+  values: number[],
+  row: number,
+  col: number,
+  relief: number,
+  support: number,
+) {
+  const perTile = GRID / COLS,
+    startX = col * perTile,
+    startY = row * perTile;
+  let highest = 0;
+  for (let y = 0; y <= perTile; y += 1)
+    for (let x = 0; x <= perTile; x += 1)
+      highest = Math.max(
+        highest,
+        values[(startY + y) * (GRID + 1) + startX + x],
+      );
+  return support + 0.22 + highest * relief;
+}
+
+function trimPlaceholderLetter(template: Template, terrainTop: number) {
+  return readTriangles(template.data).map((triangle) =>
+    triangle.map((value, index) =>
+      index % 3 === 2 && Math.abs(value - template.bounds.maxZ) < 0.001
+        ? terrainTop + 1
+        : value,
+    ),
+  );
 }
 
 function terrainBoardTriangles(
@@ -560,12 +593,14 @@ function TilePreview({
   index,
   selected,
   terrainOnly,
+  placeholder,
   values,
   onClick,
 }: {
   index: number;
   selected: boolean;
   terrainOnly: boolean;
+  placeholder: boolean;
   values: number[];
   onClick: () => void;
 }) {
@@ -613,7 +648,7 @@ function TilePreview({
   }, [col, row, values]);
   return (
     <button
-      className={`tile ${selected ? "selected" : ""} ${terrainOnly ? "terrainOnly" : ""}`}
+      className={`tile ${selected ? "selected" : ""} ${terrainOnly ? "terrainOnly" : ""} ${placeholder ? "placeholder" : ""}`}
       onClick={onClick}
       aria-label={`Tile ${row + 1}, ${col + 1}`}
     >
@@ -622,6 +657,7 @@ function TilePreview({
         {row + 1}.{col + 1}
       </span>
       {terrainOnly && <span className="onlyTag">terrain only</span>}
+      {placeholder && <span className="placeholderTag">צ</span>}
     </button>
   );
 }
@@ -629,10 +665,12 @@ function TilePreview({
 export default function Home() {
   const [tile, setTile] = useState<Template | null>(null),
     [board, setBoard] = useState<Template | null>(null),
+    [placeholder, setPlaceholder] = useState<Template | null>(null),
     [dem, setDem] = useState<{ name: string; data: ArrayBuffer } | null>(null),
     [elevation, setElevation] = useState(() => demoElevation()),
     [selected, setSelected] = useState(12),
     [terrainOnly, setTerrainOnly] = useState<Set<number>>(new Set()),
+    [placeholderIndex, setPlaceholderIndex] = useState<number | null>(null),
     [lat, setLat] = useState("30.81667"),
     [lon, setLon] = useState("34.76667"),
     [span, setSpan] = useState("2"),
@@ -652,25 +690,30 @@ export default function Home() {
     selectedRow = Math.floor(selected / COLS) + 1,
     selectedCol = (selected % COLS) + 1,
     selectedOnly = terrainOnly.has(selected),
+    selectedPlaceholder = placeholderIndex === selected,
     totals = useMemo(
       () => ({
-        regular: TILE_COUNT - terrainOnly.size,
+        regular:
+          TILE_COUNT - terrainOnly.size - (placeholderIndex === null ? 0 : 1),
         only: terrainOnly.size,
+        placeholder: placeholderIndex === null ? 0 : 1,
       }),
-      [terrainOnly],
+      [placeholderIndex, terrainOnly],
     );
   useEffect(() => {
     let cancelled = false;
     async function loadTemplates() {
       try {
-        const [builtInTile, builtInBoard] = await Promise.all([
+        const [builtInTile, builtInBoard, builtInPlaceholder] = await Promise.all([
           loadBuiltInTemplate("/tile.stl", "Built-in puzzle tile"),
           loadBuiltInTemplate("/board.stl", "Built-in puzzle board"),
+          loadBuiltInTemplate("/placeholder.stl", "Built-in placeholder tile"),
         ]);
         if (cancelled) return;
         setTile(builtInTile);
         setBoard(builtInBoard);
-        setStatus("Your built-in tile and board templates are ready.");
+        setPlaceholder(builtInPlaceholder);
+        setStatus("Your built-in puzzle and placeholder tiles are ready.");
       } catch (error) {
         if (!cancelled)
           setStatus(
@@ -802,22 +845,65 @@ export default function Home() {
       return next;
     });
   }
+  function togglePlaceholder() {
+    if (!placeholder) {
+      setStatus("The built-in placeholder tile is still loading.");
+      return;
+    }
+    if (selectedPlaceholder) {
+      setPlaceholderIndex(null);
+      setStatus(`Placeholder removed from tile ${selectedRow}.${selectedCol}.`);
+      return;
+    }
+    setTerrainOnly((current) => {
+      const next = new Set(current);
+      next.delete(selected);
+      return next;
+    });
+    setPlaceholderIndex(selected);
+    setStatus(
+      `Tile ${selectedRow}.${selectedCol} is now the placeholder. Its צ stays 1 mm above this tile's highest terrain.`,
+    );
+  }
+  function adjustArea(delta: number) {
+    setSpan((current) => {
+      const next = Math.min(
+        200,
+        Math.max(0.1, Math.round(((Number(current) || 2) + delta) * 10) / 10),
+      );
+      return String(next);
+    });
+  }
   function exportTile(index: number) {
-    const only = terrainOnly.has(index),
+    const isPlaceholder = placeholderIndex === index && Boolean(placeholder),
+      only = terrainOnly.has(index) && !isPlaceholder,
       row = Math.floor(index / COLS),
       col = index % COLS,
+      source = isPlaceholder ? placeholder : tile,
+      sourceBounds = isPlaceholder && placeholder ? placeholder.bounds : tileBounds,
+      support = isPlaceholder ? 0 : undefined,
+      reliefMm = Math.max(0.5, Number(relief) || 8),
       terrain = terrainTriangles(
         elevation,
         row,
         col,
-        tileBounds,
-        Math.max(0.5, Number(relief) || 8),
+        sourceBounds,
+        reliefMm,
         only,
+        support,
       ),
-      combined =
-        only || !tile ? terrain : [...readTriangles(tile.data), ...terrain];
+      sourceTriangles =
+        isPlaceholder && placeholder
+          ? trimPlaceholderLetter(
+              placeholder,
+              terrainPeak(elevation, row, col, reliefMm, 0),
+            )
+          : source
+            ? readTriangles(source.data)
+            : [],
+      combined = only || !source ? terrain : [...sourceTriangles, ...terrain];
     download(
-      `terrain-tile-r${row + 1}-c${col + 1}${only ? "-terrain-only" : ""}.stl`,
+      `terrain-tile-r${row + 1}-c${col + 1}${isPlaceholder ? "-placeholder" : only ? "-terrain-only" : ""}.stl`,
       binaryStl(combined),
     );
     setStatus(`Tile ${row + 1}.${col + 1} downloaded.`);
@@ -861,8 +947,8 @@ export default function Home() {
           <p className="eyebrow">FROM LANDSCAPE TO PRINTABLE PIECES</p>
           <h1>Build a terrain puzzle that fits your board.</h1>
           <p className="lede">
-            Import your templates, sample a real landscape, review every cut
-            piece, then export printable STL files.
+            Choose a landscape, review every cut piece, then export printable
+            STL files that fit your fixed puzzle set.
           </p>
         </div>
         <div className="heroMetric">
@@ -870,6 +956,8 @@ export default function Home() {
           <span>puzzle-base tiles</span>
           <b>{totals.only}</b>
           <span>terrain-only tiles</span>
+          <b>{totals.placeholder}</b>
+          <span>placeholder tile</span>
         </div>
       </section>
       <section className="workspace">
@@ -930,13 +1018,27 @@ export default function Home() {
             Area width <output>{span} km</output>
             <input
               type="range"
-              min=".5"
+              min=".1"
               max="200"
-              step="1"
+              step=".1"
               value={span}
               onChange={(e) => setSpan(e.target.value)}
             />
           </label>
+          <div className="areaAdjust" aria-label="Adjust area width">
+            <button type="button" onClick={() => adjustArea(-1)}>
+              −1 km
+            </button>
+            <button type="button" onClick={() => adjustArea(-0.1)}>
+              −0.1 km
+            </button>
+            <button type="button" onClick={() => adjustArea(0.1)}>
+              +0.1 km
+            </button>
+            <button type="button" onClick={() => adjustArea(1)}>
+              +1 km
+            </button>
+          </div>
           <button className="primary" onClick={fetchElevation}>
             Fetch & slice terrain <span>→</span>
           </button>
@@ -953,7 +1055,8 @@ export default function Home() {
               <p>Click a tile to decide whether it keeps the puzzle base.</p>
             </div>
             <div className="legend">
-              <i></i> standard <i className="outline"></i> terrain only
+              <i></i> standard <i className="outline"></i> terrain only <b>צ</b>{" "}
+              placeholder
             </div>
           </div>
           <div
@@ -968,6 +1071,7 @@ export default function Home() {
                   index={i}
                   selected={i === selected}
                   terrainOnly={terrainOnly.has(i)}
+                  placeholder={placeholderIndex === i}
                   values={elevation}
                   onClick={() => setSelected(i)}
                 />
@@ -986,18 +1090,41 @@ export default function Home() {
           </h2>
           <div className="tileDiagram">
             <div className="terrainShape"></div>
-            <div className={`baseShape ${selectedOnly ? "gone" : ""}`}></div>
+            <div
+              className={`baseShape ${selectedOnly ? "gone" : ""} ${selectedPlaceholder ? "placeholderBase" : ""}`}
+            ></div>
           </div>
           <div className="choice">
-            <b>{selectedOnly ? "Terrain only" : "Puzzle base + terrain"}</b>
+            <b>
+              {selectedPlaceholder
+                ? "Placeholder + terrain"
+                : selectedOnly
+                  ? "Terrain only"
+                  : "Puzzle base + terrain"}
+            </b>
             <p>
-              {selectedOnly
+              {selectedPlaceholder
+                ? "Your 25 × 25 mm placeholder replaces this tile. The צ is trimmed to 1 mm above this tile's highest terrain."
+                : selectedOnly
                 ? "A terrain backing replaces the 5 mm puzzle base."
                 : "Terrain overlaps the template top by 0.25 mm for a slicer-ready combined STL."}
             </p>
-            <button className="toggle" onClick={toggleTerrainOnly}>
-              {selectedOnly ? "Restore puzzle base" : "Make terrain only"}
-            </button>
+            {selectedPlaceholder ? (
+              <button className="toggle placeholderToggle" onClick={togglePlaceholder}>
+                Remove placeholder
+              </button>
+            ) : (
+              <>
+                <button className="toggle" onClick={toggleTerrainOnly}>
+                  {selectedOnly ? "Restore puzzle base" : "Make terrain only"}
+                </button>
+                <button className="toggle placeholderToggle" onClick={togglePlaceholder}>
+                  {placeholderIndex === null
+                    ? "Use placeholder for this tile"
+                    : "Move placeholder here"}
+                </button>
+              </>
+            )}
           </div>
           <label>
             Relief height <output>{relief} mm</output>
