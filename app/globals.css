@@ -1,5 +1,6 @@
 @import "tailwindcss";
 :root {
+  --pages-build: 20260823;
   --ink: #10343a;
   --muted: #678086;
   --line: #d9e4e2;

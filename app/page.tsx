@@ -1316,7 +1316,7 @@ export default function Home() {
     );
   }
   return (
-    <main>
+    <main data-pages-build="20260823">
       <header>
         <div className="brand">
           <span className="mark">⌁</span>
