@@ -1017,21 +1017,24 @@ header {
   }
 }
 
-/* On a shorter desktop screen, preserve every control instead of clipping it. */
+/* Keep the app itself fixed; shorter screens scroll only the control panels. */
 @media (min-width: 980px) and (max-height: 1080px) {
   body {
-    overflow-y: auto;
+    overflow: hidden;
   }
   main {
-    height: auto;
-    min-height: 100vh;
-    overflow: visible;
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
   }
   .workspace {
-    flex: none;
+    flex: 1;
+    min-height: 0;
   }
-  .panel {
-    overflow: visible;
+  .controls,
+  .inspector {
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }
 

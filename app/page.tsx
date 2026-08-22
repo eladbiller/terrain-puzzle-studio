@@ -959,7 +959,7 @@ function TerrainViewer({
           }}
           onPointerMove={(event) => {
             if (!drag.current) return;
-            setYaw(drag.current.yaw + (event.clientX - drag.current.x) / 180);
+            setYaw(drag.current.yaw - (event.clientX - drag.current.x) / 180);
           }}
           onPointerUp={() => { drag.current = null; }}
           onPointerCancel={() => { drag.current = null; }}
