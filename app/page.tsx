@@ -141,8 +141,10 @@ function terrainTriangles(
   const perTile = GRID / COLS,
     startX = col * perTile,
     startY = row * perTile,
-    centerX = (bounds.minX + bounds.maxX) / 2,
-    centerY = (bounds.minY + bounds.maxY) / 2,
+    // The puzzle connectors extend unevenly on two sides. Terrain belongs on
+    // the centered 25 × 25 mm printable top, not the connector envelope.
+    centerX = 0,
+    centerY = 0,
     support =
       supportOverride ??
       (terrainOnly ? Math.max(bounds.minZ, 0) + 1.2 : bounds.maxZ - 0.25),
@@ -286,6 +288,15 @@ function download(name: string, data: ArrayBuffer) {
   anchor.download = name;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function fileStem(name: string) {
+  const cleaned = name
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+  return cleaned || "terrain-puzzle";
 }
 
 function terrainTile(zoom: number, x: number, y: number) {
@@ -592,14 +603,12 @@ function MapPicker({
 function TilePreview({
   index,
   selected,
-  terrainOnly,
   placeholder,
   values,
   onClick,
 }: {
   index: number;
   selected: boolean;
-  terrainOnly: boolean;
   placeholder: boolean;
   values: number[];
   onClick: () => void;
@@ -648,7 +657,7 @@ function TilePreview({
   }, [col, row, values]);
   return (
     <button
-      className={`tile ${selected ? "selected" : ""} ${terrainOnly ? "terrainOnly" : ""} ${placeholder ? "placeholder" : ""}`}
+      className={`tile ${selected ? "selected" : ""} ${placeholder ? "placeholder" : ""}`}
       onClick={onClick}
       aria-label={`Tile ${row + 1}, ${col + 1}`}
     >
@@ -656,7 +665,6 @@ function TilePreview({
       <span className="tileTag">
         {row + 1}.{col + 1}
       </span>
-      {terrainOnly && <span className="onlyTag">terrain only</span>}
       {placeholder && <span className="placeholderTag">צ</span>}
     </button>
   );
@@ -669,12 +677,13 @@ export default function Home() {
     [dem, setDem] = useState<{ name: string; data: ArrayBuffer } | null>(null),
     [elevation, setElevation] = useState(() => demoElevation()),
     [selected, setSelected] = useState(12),
-    [terrainOnly, setTerrainOnly] = useState<Set<number>>(new Set()),
     [placeholderIndex, setPlaceholderIndex] = useState<number | null>(null),
     [lat, setLat] = useState("30.81667"),
     [lon, setLon] = useState("34.76667"),
     [span, setSpan] = useState("2"),
     [relief, setRelief] = useState("8"),
+    [verticalModifier, setVerticalModifier] = useState("1"),
+    [puzzleName, setPuzzleName] = useState("terrain-puzzle"),
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
     );
@@ -689,16 +698,16 @@ export default function Home() {
     },
     selectedRow = Math.floor(selected / COLS) + 1,
     selectedCol = (selected % COLS) + 1,
-    selectedOnly = terrainOnly.has(selected),
     selectedPlaceholder = placeholderIndex === selected,
+    effectiveRelief =
+      Math.max(0.5, Number(relief) || 8) *
+      Math.max(0.1, Number(verticalModifier) || 1),
     totals = useMemo(
       () => ({
-        regular:
-          TILE_COUNT - terrainOnly.size - (placeholderIndex === null ? 0 : 1),
-        only: terrainOnly.size,
+        regular: TILE_COUNT - (placeholderIndex === null ? 0 : 1),
         placeholder: placeholderIndex === null ? 0 : 1,
       }),
-      [placeholderIndex, terrainOnly],
+      [placeholderIndex],
     );
   useEffect(() => {
     let cancelled = false;
@@ -838,13 +847,6 @@ export default function Home() {
       );
     }
   }
-  function toggleTerrainOnly() {
-    setTerrainOnly((current) => {
-      const next = new Set(current);
-      selectedOnly ? next.delete(selected) : next.add(selected);
-      return next;
-    });
-  }
   function togglePlaceholder() {
     if (!placeholder) {
       setStatus("The built-in placeholder tile is still loading.");
@@ -855,11 +857,6 @@ export default function Home() {
       setStatus(`Placeholder removed from tile ${selectedRow}.${selectedCol}.`);
       return;
     }
-    setTerrainOnly((current) => {
-      const next = new Set(current);
-      next.delete(selected);
-      return next;
-    });
     setPlaceholderIndex(selected);
     setStatus(
       `Tile ${selectedRow}.${selectedCol} is now the placeholder. Its צ stays 1 mm above this tile's highest terrain.`,
@@ -876,34 +873,32 @@ export default function Home() {
   }
   function exportTile(index: number) {
     const isPlaceholder = placeholderIndex === index && Boolean(placeholder),
-      only = terrainOnly.has(index) && !isPlaceholder,
       row = Math.floor(index / COLS),
       col = index % COLS,
       source = isPlaceholder ? placeholder : tile,
       sourceBounds = isPlaceholder && placeholder ? placeholder.bounds : tileBounds,
       support = isPlaceholder ? 0 : undefined,
-      reliefMm = Math.max(0.5, Number(relief) || 8),
       terrain = terrainTriangles(
         elevation,
         row,
         col,
         sourceBounds,
-        reliefMm,
-        only,
+        effectiveRelief,
+        false,
         support,
       ),
       sourceTriangles =
         isPlaceholder && placeholder
           ? trimPlaceholderLetter(
               placeholder,
-              terrainPeak(elevation, row, col, reliefMm, 0),
+              terrainPeak(elevation, row, col, effectiveRelief, 0),
             )
           : source
             ? readTriangles(source.data)
             : [],
-      combined = only || !source ? terrain : [...sourceTriangles, ...terrain];
+      combined = !source ? terrain : [...sourceTriangles, ...terrain];
     download(
-      `terrain-tile-r${row + 1}-c${col + 1}${isPlaceholder ? "-placeholder" : only ? "-terrain-only" : ""}.stl`,
+      `${fileStem(puzzleName)}-tile-r${row + 1}-c${col + 1}${isPlaceholder ? "-placeholder" : ""}.stl`,
       binaryStl(combined),
     );
     setStatus(`Tile ${row + 1}.${col + 1} downloaded.`);
@@ -913,10 +908,13 @@ export default function Home() {
       setStatus("Load board.stl first to export the complete terrain board.");
       return;
     }
-    const reliefMm = Math.max(0.5, Number(relief) || 8),
-      terrain = terrainBoardTriangles(elevation, board.bounds, reliefMm);
+    const terrain = terrainBoardTriangles(
+      elevation,
+      board.bounds,
+      effectiveRelief,
+    );
     download(
-      "terrain-board-combined.stl",
+      `${fileStem(puzzleName)}-board.stl`,
       binaryStl([...readTriangles(board.data), ...terrain]),
     );
     setStatus(
@@ -954,8 +952,6 @@ export default function Home() {
         <div className="heroMetric">
           <b>{totals.regular}</b>
           <span>puzzle-base tiles</span>
-          <b>{totals.only}</b>
-          <span>terrain-only tiles</span>
           <b>{totals.placeholder}</b>
           <span>placeholder tile</span>
         </div>
@@ -983,19 +979,6 @@ export default function Home() {
               }}
             />
           </div>
-          <label className="demUpload">
-            <input
-              type="file"
-              accept=".tif,.tiff,image/tiff"
-              onChange={pickDem}
-            />
-            <b>High-detail DEM (GeoTIFF)</b>
-            <small>
-              {dem
-                ? dem.name
-                : "Optional: WGS84 / EPSG:4326 GeoTIFF for genuine 1–10 m terrain"}
-            </small>
-          </label>
           <div className="coordinates">
             <label>
               Latitude
@@ -1029,21 +1012,29 @@ export default function Home() {
             <button type="button" onClick={() => adjustArea(-1)}>
               −1 km
             </button>
+            <button type="button" onClick={() => adjustArea(1)}>
+              +1 km
+            </button>
             <button type="button" onClick={() => adjustArea(-0.1)}>
               −0.1 km
             </button>
             <button type="button" onClick={() => adjustArea(0.1)}>
               +0.1 km
             </button>
-            <button type="button" onClick={() => adjustArea(1)}>
-              +1 km
-            </button>
           </div>
+          <label>
+            Puzzle name
+            <input
+              value={puzzleName}
+              onChange={(e) => setPuzzleName(e.target.value)}
+              placeholder="terrain-puzzle"
+            />
+          </label>
           <button className="primary" onClick={fetchElevation}>
             Fetch & slice terrain <span>→</span>
           </button>
           <p className="hint">
-            Terrain stays terrain-only: no roads, trails, or buildings are
+            Terrain contains elevation only: no roads, trails, or buildings are
             added.
           </p>
         </aside>
@@ -1055,8 +1046,7 @@ export default function Home() {
               <p>Click a tile to decide whether it keeps the puzzle base.</p>
             </div>
             <div className="legend">
-              <i></i> standard <i className="outline"></i> terrain only <b>צ</b>{" "}
-              placeholder
+              <i></i> puzzle tile <b>צ</b> placeholder
             </div>
           </div>
           <div
@@ -1070,7 +1060,6 @@ export default function Home() {
                   key={i}
                   index={i}
                   selected={i === selected}
-                  terrainOnly={terrainOnly.has(i)}
                   placeholder={placeholderIndex === i}
                   values={elevation}
                   onClick={() => setSelected(i)}
@@ -1090,23 +1079,17 @@ export default function Home() {
           </h2>
           <div className="tileDiagram">
             <div className="terrainShape"></div>
-            <div
-              className={`baseShape ${selectedOnly ? "gone" : ""} ${selectedPlaceholder ? "placeholderBase" : ""}`}
-            ></div>
+            <div className={`baseShape ${selectedPlaceholder ? "placeholderBase" : ""}`}></div>
           </div>
           <div className="choice">
             <b>
               {selectedPlaceholder
                 ? "Placeholder + terrain"
-                : selectedOnly
-                  ? "Terrain only"
-                  : "Puzzle base + terrain"}
+                : "Puzzle base + terrain"}
             </b>
             <p>
               {selectedPlaceholder
                 ? "Your 25 × 25 mm placeholder replaces this tile. The צ is trimmed to 1 mm above this tile's highest terrain."
-                : selectedOnly
-                ? "A terrain backing replaces the 5 mm puzzle base."
                 : "Terrain overlaps the template top by 0.25 mm for a slicer-ready combined STL."}
             </p>
             {selectedPlaceholder ? (
@@ -1114,20 +1097,15 @@ export default function Home() {
                 Remove placeholder
               </button>
             ) : (
-              <>
-                <button className="toggle" onClick={toggleTerrainOnly}>
-                  {selectedOnly ? "Restore puzzle base" : "Make terrain only"}
-                </button>
-                <button className="toggle placeholderToggle" onClick={togglePlaceholder}>
-                  {placeholderIndex === null
-                    ? "Use placeholder for this tile"
-                    : "Move placeholder here"}
-                </button>
-              </>
+              <button className="toggle placeholderToggle" onClick={togglePlaceholder}>
+                {placeholderIndex === null
+                  ? "Use placeholder for this tile"
+                  : "Move placeholder here"}
+              </button>
             )}
           </div>
           <label>
-            Relief height <output>{relief} mm</output>
+            Base relief range <output>{relief} mm</output>
             <input
               type="range"
               min="2"
@@ -1137,6 +1115,24 @@ export default function Home() {
               onChange={(e) => setRelief(e.target.value)}
             />
           </label>
+          <label>
+            Vertical modifier <output>×{verticalModifier}</output>
+            <select
+              value={verticalModifier}
+              onChange={(e) => setVerticalModifier(e.target.value)}
+            >
+              <option value="0.25">×0.25 — very flat</option>
+              <option value="0.5">×0.5 — flatter</option>
+              <option value="1">×1 — normal</option>
+              <option value="1.5">×1.5 — enhanced</option>
+              <option value="2">×2 — strong</option>
+            </select>
+          </label>
+          <p className="printNote">
+            Final height difference: {effectiveRelief.toFixed(1)} mm. Relief is
+            the printed height between the lowest and highest terrain; the
+            modifier scales it.
+          </p>
           <div className="exports">
             <button className="download" onClick={() => exportTile(selected)}>
               Download selected STL
