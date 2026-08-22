@@ -27,6 +27,7 @@ const COLS = 4,
   TILE_COUNT = COLS * ROWS,
   TILE_TOP_MM = 25,
   BOARD_TERRAIN_RIM_MM = 5;
+const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 type SavedProject = {
   version: 1;
@@ -78,6 +79,10 @@ async function loadBuiltInTemplate(path: string, name: string): Promise<Template
   return { name, data, bounds: boundsOfStl(data) };
 }
 
+function builtInAsset(name: string) {
+  return `${APP_BASE_PATH}/${name}`;
+}
+
 function demoElevation(resolution = GRID) {
   const result: number[] = [];
   for (let y = 0; y <= resolution; y += 1)
@@ -99,6 +104,33 @@ function demoElevation(resolution = GRID) {
 }
 
 const DEFAULT_ELEVATION = demoElevation();
+
+function repairElevationOutliers(values: number[]) {
+  // Elevation tiles can occasionally contain a single bad pixel. It becomes a
+  // tall needle in a printed STL, so replace only values that disagree sharply
+  // with every nearby sample. Two passes also catch a pair of adjacent pixels.
+  let repaired = [...values];
+  for (let pass = 0; pass < 2; pass += 1) {
+    const source = repaired;
+    repaired = [...source];
+    for (let y = 1; y < GRID; y += 1)
+      for (let x = 1; x < GRID; x += 1) {
+        const nearby: number[] = [];
+        for (let dy = -1; dy <= 1; dy += 1)
+          for (let dx = -1; dx <= 1; dx += 1) {
+            if (dx || dy) nearby.push(source[(y + dy) * (GRID + 1) + x + dx]);
+          }
+        nearby.sort((a, b) => a - b);
+        const middle = nearby[Math.floor(nearby.length / 2)],
+          deviations = nearby.map((value) => Math.abs(value - middle)).sort((a, b) => a - b),
+          medianDeviation = deviations[Math.floor(deviations.length / 2)],
+          index = y * (GRID + 1) + x,
+          limit = Math.max(20, medianDeviation * 10);
+        if (Math.abs(source[index] - middle) > limit) repaired[index] = middle;
+      }
+  }
+  return repaired;
+}
 
 function flattestCorner(values: number[]) {
   const perTile = GRID / COLS,
@@ -542,6 +574,16 @@ function MapPicker({
         (direction === "east" ? lonStep : direction === "west" ? -lonStep : 0),
     );
   }
+  function jump(direction: "north" | "south" | "east" | "west") {
+    const distanceKm = Math.max(0.1, areaKm),
+      latDistance = distanceKm / 111.32,
+      lonDistance =
+        distanceKm / (111.32 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180)));
+    onPick(
+      latitude + (direction === "north" ? latDistance : direction === "south" ? -latDistance : 0),
+      longitude + (direction === "east" ? lonDistance : direction === "west" ? -lonDistance : 0),
+    );
+  }
   async function search(event: FormEvent) {
     event.preventDefault();
     if (!query.trim()) return;
@@ -696,6 +738,15 @@ function MapPicker({
           : `${stepKm.toFixed(1)} km`}
         . Use the full-screen map when you want to pan freely.
       </p>
+      <div className="jumpArea">
+        <b>Jump one full area width</b>
+        <div className="jumpPad" aria-label="Jump terrain square by one full area">
+          <button type="button" onClick={() => jump("north")}>Jump ↑</button>
+          <button type="button" onClick={() => jump("west")}>Jump ←</button>
+          <button type="button" onClick={() => jump("south")}>Jump ↓</button>
+          <button type="button" onClick={() => jump("east")}>Jump →</button>
+        </div>
+      </div>
       <button className="fullMapButton" type="button" onClick={() => setFullscreen(true)}>
         Open full-screen map
       </button>
@@ -966,9 +1017,9 @@ export default function Home() {
     async function loadTemplates() {
       try {
         const [builtInTile, builtInBoard, builtInPlaceholder] = await Promise.all([
-          loadBuiltInTemplate("/tile.stl", "Built-in puzzle tile"),
-          loadBuiltInTemplate("/board.stl", "Built-in puzzle board"),
-          loadBuiltInTemplate("/placeholder.stl", "Built-in placeholder tile"),
+          loadBuiltInTemplate(builtInAsset("tile.stl"), "Built-in puzzle tile"),
+          loadBuiltInTemplate(builtInAsset("board.stl"), "Built-in puzzle board"),
+          loadBuiltInTemplate(builtInAsset("placeholder.stl"), "Built-in placeholder tile"),
         ]);
         if (cancelled) return;
         setTile(builtInTile);
@@ -1091,6 +1142,7 @@ export default function Home() {
             samples.push(top * (1 - fy) + bottom * fy);
           }
       }
+      samples = repairElevationOutliers(samples);
       const low = Math.min(...samples),
         high = Math.max(...samples),
         range = Math.max(1, high - low),

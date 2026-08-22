@@ -805,6 +805,29 @@ header {
   grid-column: 3;
   grid-row: 2;
 }
+.jumpArea {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.jumpArea b {
+  display: block;
+  margin-bottom: 5px;
+}
+.jumpPad {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.jumpPad button {
+  border: 1px solid #86aaa1;
+  border-radius: 6px;
+  background: #edf5f1;
+  color: var(--deep);
+  padding: 6px 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
 .demUpload {
   display: block !important;
   margin: 12px 0 !important;
@@ -1024,6 +1047,8 @@ header {
   .projectActions button,
   .projectLoad,
   .areaAdjust button,
+  .jumpArea,
+  .jumpPad button,
   .mapSearch button,
   .searchResults button {
     font-size: 12px;

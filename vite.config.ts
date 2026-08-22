@@ -11,6 +11,7 @@ const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
+const isGitHubPagesExport = process.env.GITHUB_PAGES_EXPORT === 'true';
 
 const localBindingConfig = {
   main: 'vinext/server/app-router-entry',
@@ -50,7 +51,11 @@ export default defineConfig(async () => {
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,
     plugins: [
-      vinext(),
+      vinext({
+        nextConfig: isGitHubPagesExport
+          ? { output: 'export', basePath: '/terrain-puzzle-studio' }
+          : undefined,
+      }),
       sites(),
       cloudflare({
         viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
