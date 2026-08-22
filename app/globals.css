@@ -1483,3 +1483,63 @@ header {
     padding: 9px;
   }
 }
+
+/* At common 1080p desktop height, keep every left-panel control in view. */
+@media (min-width: 980px) and (min-height: 850px) and (max-height: 1100px) {
+  .step {
+    margin-bottom: 5px;
+  }
+  .mapMount {
+    margin-bottom: 5px !important;
+  }
+  .mapSurface {
+    /* Still substantially larger than the compact 120px map. */
+    height: 165px;
+  }
+  .mapPicker p {
+    line-height: 1.28;
+    margin: 4px 0;
+  }
+  .movePad {
+    grid-template-columns: repeat(3, 28px);
+    grid-template-rows: repeat(2, 26px);
+    margin: 4px 0 1px;
+  }
+  .jumpArea {
+    margin-top: 5px;
+  }
+  .jumpPad {
+    gap: 3px;
+  }
+  .jumpPad button {
+    padding: 5px 3px;
+  }
+  .fullMapButton {
+    margin-top: 5px;
+    padding: 7px;
+  }
+  .controls label,
+  .inspector > label {
+    margin: 4px 0;
+  }
+  .controls input:not([type="range"]),
+  .inspector select {
+    padding: 7px;
+    margin-top: 3px;
+  }
+  .areaAdjust {
+    gap: 3px;
+    margin: -1px 0 4px;
+  }
+  .areaAdjust button {
+    padding: 5px 3px;
+  }
+  .primary {
+    margin-top: 3px;
+    padding: 7px;
+  }
+  .hint {
+    margin-top: 4px;
+    line-height: 1.25;
+  }
+}
