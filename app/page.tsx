@@ -22,7 +22,7 @@ type Bounds = {
 type Template = { name: string; data: ArrayBuffer; bounds: Bounds };
 const COLS = 4,
   ROWS = 4,
-  GRID = 128,
+  GRID = 256,
   TILE_COUNT = COLS * ROWS;
 
 function boundsOfStl(buffer: ArrayBuffer): Bounds {
@@ -183,11 +183,14 @@ function terrainBoardTriangles(
   values: number[],
   bounds: Bounds,
   relief: number,
+  rimMm: number,
 ) {
   const width = bounds.maxX - bounds.minX,
     depth = bounds.maxY - bounds.minY,
     support = bounds.maxZ - 0.35,
-    floor = support - 0.25;
+    floor = support - 0.25,
+    rimX = Math.max(1, Math.min(width / 2 - 1, rimMm)) / width,
+    rimY = Math.max(1, Math.min(depth / 2 - 1, rimMm)) / depth;
   const point = (x: number, y: number, bottom = false) => [
     bounds.minX + (width * x) / GRID,
     bounds.minY + (depth * y) / GRID,
@@ -196,8 +199,14 @@ function terrainBoardTriangles(
   const tris: number[][] = [],
     add = (a: number[], b: number[], c: number[]) =>
       tris.push([...a, ...b, ...c]);
+  const isRing = (x: number, y: number) => {
+    const u = (x + 0.5) / GRID,
+      v = (y + 0.5) / GRID;
+    return u < rimX || u > 1 - rimX || v < rimY || v > 1 - rimY;
+  };
   for (let y = 0; y < GRID; y += 1)
     for (let x = 0; x < GRID; x += 1) {
+      if (!isRing(x, y)) continue;
       const a = point(x, y),
         b = point(x + 1, y),
         c = point(x + 1, y + 1),
@@ -210,19 +219,19 @@ function terrainBoardTriangles(
       add(a, c, d);
       add(ab, cb, bb);
       add(ab, db, cb);
-      if (y === 0) {
+      if (y === 0 || !isRing(x, y - 1)) {
         add(ab, b, bb);
         add(ab, a, b);
       }
-      if (y === GRID - 1) {
+      if (y === GRID - 1 || !isRing(x, y + 1)) {
         add(db, cb, c);
         add(db, c, d);
       }
-      if (x === 0) {
+      if (x === 0 || !isRing(x - 1, y)) {
         add(ab, db, d);
         add(ab, d, a);
       }
-      if (x === GRID - 1) {
+      if (x === GRID - 1 || !isRing(x + 1, y)) {
         add(bb, c, cb);
         add(bb, b, c);
       }
@@ -614,6 +623,7 @@ export default function Home() {
     [lon, setLon] = useState("34.76667"),
     [span, setSpan] = useState("2"),
     [relief, setRelief] = useState("8"),
+    [boardRim, setBoardRim] = useState("2.6"),
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
     );
@@ -790,7 +800,12 @@ export default function Home() {
       return;
     }
     const reliefMm = Math.max(0.5, Number(relief) || 8),
-      terrain = terrainBoardTriangles(elevation, board.bounds, reliefMm);
+      terrain = terrainBoardTriangles(
+        elevation,
+        board.bounds,
+        reliefMm,
+        Math.max(1, Number(boardRim) || 2.6),
+      );
     download(
       "terrain-board-combined.stl",
       binaryStl([...readTriangles(board.data), ...terrain]),
@@ -1018,6 +1033,19 @@ export default function Home() {
               onChange={(e) => setRelief(e.target.value)}
             />
           </label>
+          {board && (
+            <label>
+              Board terrain rim <output>{boardRim} mm</output>
+              <input
+                type="range"
+                min="1"
+                max="8"
+                step=".2"
+                value={boardRim}
+                onChange={(e) => setBoardRim(e.target.value)}
+              />
+            </label>
+          )}
           <div className="exports">
             <button className="download" onClick={() => exportTile(selected)}>
               Download selected STL
@@ -1036,9 +1064,9 @@ export default function Home() {
             </button>
           </div>
           <p className="printNote">
-            Each terrain volume penetrates the supporting STL by 0.25 mm. The
-            combined board export adds one continuous terrain surface across the
-            full board.
+            The board export places terrain only on its outer rim. The centre
+            remains blank for the 4 × 4 pieces, with the rim width setting
+            creating the clearance gap.
           </p>
         </aside>
       </section>
