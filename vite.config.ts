@@ -42,8 +42,11 @@ export default defineConfig(async () => {
   process.env.WRANGLER_LOG_PATH ??= '.wrangler/logs';
   process.env.MINIFLARE_REGISTRY_PATH ??= '.wrangler/registry';
 
-  // Wrangler snapshots its log path while the Cloudflare plugin is imported.
-  const { cloudflare } = await import('@cloudflare/vite-plugin');
+  // GitHub Pages serves static files, so its build must not include the
+  // Worker-only Sites or Cloudflare plugins.
+  const cloudflare = isGitHubPagesExport
+    ? undefined
+    : (await import('@cloudflare/vite-plugin')).cloudflare;
 
   return {
     css: { postcss: { plugins: [tailwindcss()] } },
@@ -53,14 +56,18 @@ export default defineConfig(async () => {
     plugins: [
       vinext({
         nextConfig: isGitHubPagesExport
-          ? { output: 'export', basePath: '/terrain-puzzle-studio' }
+          ? { output: 'export', assetPrefix: '/terrain-puzzle-studio' }
           : undefined,
       }),
-      sites(),
-      cloudflare({
-        viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
-        config: localBindingConfig,
-      }),
+      ...(isGitHubPagesExport
+        ? []
+        : [
+            sites(),
+            cloudflare!({
+              viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
+              config: localBindingConfig,
+            }),
+          ]),
     ],
   };
 });

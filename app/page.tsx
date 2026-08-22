@@ -1,5 +1,9 @@
 "use client";
 
+// The builder has no server-side state. This lets the GitHub Pages build
+// pre-render the shell while the terrain work continues in the browser.
+export const dynamic = "force-static";
+
 import {
   ChangeEvent,
   FormEvent,
