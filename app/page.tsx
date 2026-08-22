@@ -350,13 +350,11 @@ function MapPicker({
   latitude,
   longitude,
   areaKm,
-  moveStepKm,
   onPick,
 }: {
   latitude: number;
   longitude: number;
   areaKm: number;
-  moveStepKm: number;
   onPick: (latitude: number, longitude: number) => void;
 }) {
   const [zoom, setZoom] = useState(12),
@@ -366,6 +364,9 @@ function MapPicker({
     >([]),
     [searching, setSearching] = useState(false),
     [view, setView] = useState({ latitude, longitude });
+  useEffect(() => {
+    setView({ latitude, longitude });
+  }, [latitude, longitude]);
   const x = tileX(view.longitude, zoom),
     y = tileY(view.latitude, zoom),
     selectedX = tileX(longitude, zoom),
@@ -393,7 +394,10 @@ function MapPicker({
   );
   const selectedLeft = (selectedX - x) * 256,
     selectedTop = (selectedY - y) * 256,
-    stepKm = Math.max(0.01, moveStepKm);
+    metresPerPixel =
+      (40075016.686 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180))) /
+      (256 * 2 ** zoom),
+    stepKm = Math.max(0.01, (metresPerPixel * 16) / 1000);
   function move(direction: "north" | "south" | "east" | "west") {
     const latStep = stepKm / 111.32,
       lonStep =
@@ -542,11 +546,11 @@ function MapPicker({
         </button>
       </div>
       <p>
-        Use the arrows to move the square by{" "}
+        Arrow step follows the zoom: {" "}
         {stepKm < 1
           ? `${Math.round(stepKm * 1000)} m`
           : `${stepKm.toFixed(1)} km`}
-        . Search moves the map to a new place.
+        . The selected square remains centered.
       </p>
     </div>
   );
@@ -632,7 +636,6 @@ export default function Home() {
     [lat, setLat] = useState("30.81667"),
     [lon, setLon] = useState("34.76667"),
     [span, setSpan] = useState("2"),
-    [moveStep, setMoveStep] = useState("0.1"),
     [relief, setRelief] = useState("8"),
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
@@ -874,32 +877,6 @@ export default function Home() {
           <div className="step">
             <span>01</span>
             <div>
-              <h2>Templates</h2>
-              <p>Your tile and board are built into this project.</p>
-            </div>
-          </div>
-          <div className="templateFixed">
-            <span>✓</span>
-            <div>
-              <b>Puzzle tile</b>
-              <small>{tile ? "Built-in template ready" : "Loading template…"}</small>
-            </div>
-          </div>
-          <div className="templateFixed">
-            <span>✓</span>
-            <div>
-              <b>Puzzle board</b>
-              <small>{board ? "Built-in template ready" : "Loading template…"}</small>
-            </div>
-          </div>
-          <div className="measure">
-            <span>Terrain footprint per tile</span>
-            <b>25.0 × 25.0 mm</b>
-            <small>Board: 110.2 mm square · terrain rim: 5.0 mm</small>
-          </div>
-          <div className="step second">
-            <span>02</span>
-            <div>
               <h2>Terrain area</h2>
               <p>Search for a place, then use arrows to move the square.</p>
             </div>
@@ -961,20 +938,6 @@ export default function Home() {
               onChange={(e) => setSpan(e.target.value)}
             />
           </label>
-          <label>
-            Arrow step
-            <select
-              value={moveStep}
-              onChange={(e) => setMoveStep(e.target.value)}
-            >
-              <option value="0.025">25 m — extra small</option>
-              <option value="0.05">50 m</option>
-              <option value="0.1">100 m</option>
-              <option value="0.25">250 m</option>
-              <option value="0.5">500 m</option>
-              <option value="1">1 km</option>
-            </select>
-          </label>
           <button className="primary" onClick={fetchElevation}>
             Fetch & slice terrain <span>→</span>
           </button>
@@ -986,7 +949,7 @@ export default function Home() {
         <section className="panel review">
           <div className="reviewHead">
             <div>
-              <p className="eyebrow">03 · REVIEW THE CUT</p>
+              <p className="eyebrow">02 · REVIEW THE CUT</p>
               <h2>Choose a piece</h2>
               <p>Click a tile to decide whether it keeps the puzzle base.</p>
             </div>

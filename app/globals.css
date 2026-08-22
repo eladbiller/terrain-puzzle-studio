@@ -208,37 +208,6 @@ header {
   text-overflow: ellipsis;
   max-width: 190px;
 }
-.templateFixed {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px;
-  border: 1px solid #c7d8d3;
-  border-radius: 10px;
-  margin: 9px 0;
-  background: #fbfdfb;
-}
-.templateFixed > span {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: #e8f0ec;
-  display: grid;
-  place-items: center;
-  color: var(--green);
-  font-weight: 800;
-}
-.templateFixed b,
-.templateFixed small {
-  display: block;
-}
-.templateFixed b {
-  font-size: 12px;
-}
-.templateFixed small {
-  color: var(--muted);
-  font-size: 10px;
-}
 .measure {
   margin: 13px 0 21px;
   padding: 11px;
