@@ -56,6 +56,13 @@ function boundsOfStl(buffer: ArrayBuffer): Bounds {
   return { minX, minY, minZ, maxX, maxY, maxZ, triangles: faces };
 }
 
+async function loadBuiltInTemplate(path: string, name: string): Promise<Template> {
+  const response = await fetch(path);
+  if (!response.ok) throw new Error(`Could not load the built-in ${name}.`);
+  const data = await response.arrayBuffer();
+  return { name, data, bounds: boundsOfStl(data) };
+}
+
 function demoElevation(resolution = GRID) {
   const result: number[] = [];
   for (let y = 0; y <= resolution; y += 1)
@@ -631,10 +638,10 @@ export default function Home() {
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
     );
   const tileBounds = tile?.bounds ?? {
-      minX: -14,
+      minX: -12.5,
       maxX: 12.5,
       minY: -12.5,
-      maxY: 14,
+      maxY: 12.5,
       minZ: 0,
       maxZ: 5,
       triangles: 0,
@@ -649,23 +656,32 @@ export default function Home() {
       }),
       [terrainOnly],
     );
-  async function pickTemplate(
-    event: ChangeEvent<HTMLInputElement>,
-    kind: "tile" | "board",
-  ) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      const data = await file.arrayBuffer(),
-        template = { name: file.name, data, bounds: boundsOfStl(data) };
-      kind === "tile" ? setTile(template) : setBoard(template);
-      setStatus(`${file.name} is loaded and measured.`);
-    } catch (error) {
-      setStatus(
-        error instanceof Error ? error.message : "That file could not be read.",
-      );
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTemplates() {
+      try {
+        const [builtInTile, builtInBoard] = await Promise.all([
+          loadBuiltInTemplate("/tile.stl", "Built-in puzzle tile"),
+          loadBuiltInTemplate("/board.stl", "Built-in puzzle board"),
+        ]);
+        if (cancelled) return;
+        setTile(builtInTile);
+        setBoard(builtInBoard);
+        setStatus("Your built-in tile and board templates are ready.");
+      } catch (error) {
+        if (!cancelled)
+          setStatus(
+            error instanceof Error
+              ? error.message
+              : "The built-in templates could not be loaded.",
+          );
+      }
     }
-  }
+    void loadTemplates();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   async function pickDem(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -859,53 +875,27 @@ export default function Home() {
             <span>01</span>
             <div>
               <h2>Templates</h2>
-              <p>Load the models you supplied.</p>
+              <p>Your tile and board are built into this project.</p>
             </div>
           </div>
-          <label className="upload">
-            <input
-              type="file"
-              accept=".stl"
-              onChange={(e) => pickTemplate(e, "tile")}
-            />
-            <span>+</span>
+          <div className="templateFixed">
+            <span>✓</span>
             <div>
-              <b>Tile template</b>
-              <small>
-                {tile
-                  ? `${tile.name} · ${tile.bounds.triangles} faces`
-                  : "Choose tile.stl"}
-              </small>
+              <b>Puzzle tile</b>
+              <small>{tile ? "Built-in template ready" : "Loading template…"}</small>
             </div>
-          </label>
-          <label className="upload">
-            <input
-              type="file"
-              accept=".stl"
-              onChange={(e) => pickTemplate(e, "board")}
-            />
-            <span>+</span>
+          </div>
+          <div className="templateFixed">
+            <span>✓</span>
             <div>
-              <b>Board reference</b>
-              <small>
-                {board
-                  ? `${board.name} · ${board.bounds.triangles} faces`
-                  : "Choose board.stl"}
-              </small>
+              <b>Puzzle board</b>
+              <small>{board ? "Built-in template ready" : "Loading template…"}</small>
             </div>
-          </label>
+          </div>
           <div className="measure">
-            <span>Tile footprint</span>
-            <b>
-              {(tileBounds.maxX - tileBounds.minX).toFixed(1)} ×{" "}
-              {(tileBounds.maxY - tileBounds.minY).toFixed(1)} mm
-            </b>
-            {board && (
-              <small>
-                Board: {(board.bounds.maxX - board.bounds.minX).toFixed(1)} mm
-                square
-              </small>
-            )}
+            <span>Terrain footprint per tile</span>
+            <b>25.0 × 25.0 mm</b>
+            <small>Board: 110.2 mm square · terrain rim: 5.0 mm</small>
           </div>
           <div className="step second">
             <span>02</span>
