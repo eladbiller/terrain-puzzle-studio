@@ -583,7 +583,7 @@ header {
 }
 .mapZoom {
   position: absolute;
-  top: 8px;
+  top: 48px;
   right: 8px;
   display: grid;
   overflow: hidden;
@@ -694,4 +694,68 @@ header {
   background: rgba(238, 125, 75, 0.1);
   pointer-events: none;
 }
-.movePad{display:grid;grid-template-columns:repeat(3,30px);grid-template-rows:repeat(2,28px);gap:3px;justify-content:center;margin:9px 0 2px}.movePad button{border:1px solid #b9cec8;border-radius:6px;background:#fff;color:var(--deep);font-size:16px;line-height:1}.movePad button:first-child{grid-column:2}.movePad button:nth-child(2){grid-column:1;grid-row:2}.movePad button:nth-child(3){grid-column:2;grid-row:2}.movePad button:nth-child(4){grid-column:3;grid-row:2}.demUpload{display:block!important;margin:12px 0!important;padding:10px;border:1px dashed #90aea6;border-radius:9px;background:#f5faf7;cursor:pointer}.demUpload input{display:none}.demUpload b,.demUpload small{display:block}.demUpload b{font-size:11px;color:var(--green)}.demUpload small{margin-top:3px;color:var(--muted);font-size:9px;line-height:1.35}
+.movePad {
+  display: grid;
+  grid-template-columns: repeat(3, 30px);
+  grid-template-rows: repeat(2, 28px);
+  gap: 3px;
+  justify-content: center;
+  margin: 9px 0 2px;
+}
+.movePad button {
+  border: 1px solid #b9cec8;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--deep);
+  font-size: 16px;
+  line-height: 1;
+}
+.movePad button:first-child {
+  grid-column: 2;
+}
+.movePad button:nth-child(2) {
+  grid-column: 1;
+  grid-row: 2;
+}
+.movePad button:nth-child(3) {
+  grid-column: 2;
+  grid-row: 2;
+}
+.movePad button:nth-child(4) {
+  grid-column: 3;
+  grid-row: 2;
+}
+.demUpload {
+  display: block !important;
+  margin: 12px 0 !important;
+  padding: 10px;
+  border: 1px dashed #90aea6;
+  border-radius: 9px;
+  background: #f5faf7;
+  cursor: pointer;
+}
+.demUpload input {
+  display: none;
+}
+.demUpload b,
+.demUpload small {
+  display: block;
+}
+.demUpload b {
+  font-size: 11px;
+  color: var(--green);
+}
+.demUpload small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+.download.board {
+  background: #e7b75e;
+  color: #183c3a;
+}
+.download:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}

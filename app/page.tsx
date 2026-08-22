@@ -178,6 +178,57 @@ function terrainTriangles(
     }
   return tris;
 }
+
+function terrainBoardTriangles(
+  values: number[],
+  bounds: Bounds,
+  relief: number,
+) {
+  const width = bounds.maxX - bounds.minX,
+    depth = bounds.maxY - bounds.minY,
+    support = bounds.maxZ - 0.35,
+    floor = support - 0.25;
+  const point = (x: number, y: number, bottom = false) => [
+    bounds.minX + (width * x) / GRID,
+    bounds.minY + (depth * y) / GRID,
+    bottom ? floor : support + values[y * (GRID + 1) + x] * relief,
+  ];
+  const tris: number[][] = [],
+    add = (a: number[], b: number[], c: number[]) =>
+      tris.push([...a, ...b, ...c]);
+  for (let y = 0; y < GRID; y += 1)
+    for (let x = 0; x < GRID; x += 1) {
+      const a = point(x, y),
+        b = point(x + 1, y),
+        c = point(x + 1, y + 1),
+        d = point(x, y + 1),
+        ab = point(x, y, true),
+        bb = point(x + 1, y, true),
+        cb = point(x + 1, y + 1, true),
+        db = point(x, y + 1, true);
+      add(a, b, c);
+      add(a, c, d);
+      add(ab, cb, bb);
+      add(ab, db, cb);
+      if (y === 0) {
+        add(ab, b, bb);
+        add(ab, a, b);
+      }
+      if (y === GRID - 1) {
+        add(db, cb, c);
+        add(db, c, d);
+      }
+      if (x === 0) {
+        add(ab, db, d);
+        add(ab, d, a);
+      }
+      if (x === GRID - 1) {
+        add(bb, c, cb);
+        add(bb, b, c);
+      }
+    }
+  return tris;
+}
 function download(name: string, data: ArrayBuffer) {
   const url = URL.createObjectURL(new Blob([data], { type: "model/stl" })),
     anchor = document.createElement("a");
@@ -733,6 +784,21 @@ export default function Home() {
     );
     setStatus(`Tile ${row + 1}.${col + 1} downloaded.`);
   }
+  function exportBoard() {
+    if (!board) {
+      setStatus("Load board.stl first to export the complete terrain board.");
+      return;
+    }
+    const reliefMm = Math.max(0.5, Number(relief) || 8),
+      terrain = terrainBoardTriangles(elevation, board.bounds, reliefMm);
+    download(
+      "terrain-board-combined.stl",
+      binaryStl([...readTriangles(board.data), ...terrain]),
+    );
+    setStatus(
+      "Combined terrain board downloaded. It includes the board STL and the continuous terrain surface in one file.",
+    );
+  }
   function exportAll() {
     for (let i = 0; i < TILE_COUNT; i += 1)
       window.setTimeout(() => exportTile(i), i * 180);
@@ -837,14 +903,24 @@ export default function Home() {
               onPick={(nextLat, nextLon) => {
                 setLat(nextLat.toFixed(5));
                 setLon(nextLon.toFixed(5));
-                setStatus(`Terrain square moved to ${nextLat.toFixed(5)}, ${nextLon.toFixed(5)}.`);
+                setStatus(
+                  `Terrain square moved to ${nextLat.toFixed(5)}, ${nextLon.toFixed(5)}.`,
+                );
               }}
             />
           </div>
           <label className="demUpload">
-            <input type="file" accept=".tif,.tiff,image/tiff" onChange={pickDem} />
+            <input
+              type="file"
+              accept=".tif,.tiff,image/tiff"
+              onChange={pickDem}
+            />
             <b>High-detail DEM (GeoTIFF)</b>
-            <small>{dem ? dem.name : 'Optional: WGS84 / EPSG:4326 GeoTIFF for genuine 1–10 m terrain'}</small>
+            <small>
+              {dem
+                ? dem.name
+                : "Optional: WGS84 / EPSG:4326 GeoTIFF for genuine 1–10 m terrain"}
+            </small>
           </label>
           <div className="coordinates">
             <label>
@@ -949,11 +1025,20 @@ export default function Home() {
             <button className="download all" onClick={exportAll}>
               Download all 16 STLs
             </button>
+            <button
+              className="download board"
+              onClick={exportBoard}
+              disabled={!board}
+            >
+              {board
+                ? "Download combined terrain board"
+                : "Load board STL to export board terrain"}
+            </button>
           </div>
           <p className="printNote">
-            Combined tiles use your template plus a 0.25 mm terrain overlap.
-            Import as one object in your slicer and run its normal mesh-repair
-            check.
+            Each terrain volume penetrates the supporting STL by 0.25 mm. The
+            combined board export adds one continuous terrain surface across the
+            full board.
           </p>
         </aside>
       </section>
