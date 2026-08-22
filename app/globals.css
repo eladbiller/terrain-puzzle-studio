@@ -634,11 +634,17 @@ header {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -78%);
-  color: var(--orange);
+  color: #6d19ae;
   font-size: 27px;
-  text-shadow: 0 1px 3px #234;
+  text-shadow:
+    -1px -1px 0 #fff,
+    1px -1px 0 #fff,
+    -1px 1px 0 #fff,
+    1px 1px 0 #fff,
+    0 2px 4px rgba(20, 12, 38, 0.82);
   font-family: serif;
   pointer-events: none;
+  z-index: 3;
 }
 .mapAttribution {
   position: absolute;
@@ -771,9 +777,13 @@ header {
 .areaBox {
   position: absolute;
   transform: translate(-50%, -50%);
-  border: 2px dashed rgba(238, 125, 75, 0.98);
-  background: rgba(238, 125, 75, 0.1);
+  border: 3px solid #6d19ae;
+  background: rgba(109, 25, 174, 0.13);
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px rgba(34, 10, 67, 0.72);
   pointer-events: none;
+  z-index: 2;
 }
 .movePad {
   display: grid;
@@ -1258,9 +1268,10 @@ header {
     margin-bottom: 5px;
   }
   .boardPreview {
-    width: min(100%, calc(100dvh - 128px));
+    width: min(100%, 680px, calc(100dvh - 155px));
+    aspect-ratio: 1;
     min-height: 0;
-    flex: 1;
+    flex: none;
     display: grid;
     place-items: stretch;
     padding: 10px;
@@ -1272,6 +1283,7 @@ header {
     width: 100%;
     height: 100%;
     gap: 0;
+    grid-template-rows: repeat(4, minmax(0, 1fr));
   }
   .boardPreview .tile {
     border-radius: 0;
@@ -1431,7 +1443,7 @@ header {
     margin-bottom: 8px;
   }
   .boardPreview {
-    width: min(100%, calc(100dvh - 230px));
+    width: min(100%, 680px, calc(100dvh - 155px));
     padding: 10px;
     box-shadow:
       0 14px 0 #0b423f,
