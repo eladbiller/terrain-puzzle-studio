@@ -886,7 +886,6 @@ export default function Home() {
               latitude={Number(lat) || 30.81667}
               longitude={Number(lon) || 34.76667}
               areaKm={Number(span) || 2}
-              moveStepKm={Number(moveStep) || 0.1}
               onPick={(nextLat, nextLon) => {
                 setLat(nextLat.toFixed(5));
                 setLon(nextLon.toFixed(5));
