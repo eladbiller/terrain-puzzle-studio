@@ -439,13 +439,21 @@ header {
 }
 .placeholderTag {
   position: absolute;
-  right: 6px;
-  bottom: 4px;
-  color: #fff6cf;
-  font-size: 16px;
+  right: 5px;
+  bottom: 5px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #ffbd2e;
+  color: #153c3a;
+  font-size: 22px;
   font-weight: 800;
   line-height: 1;
-  text-shadow: 0 1px 3px #073f3c;
+  text-shadow: none;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.42);
 }
 .tile.placeholder {
   box-shadow:
@@ -1282,7 +1290,7 @@ header {
   .boardPreview .tiles {
     width: 100%;
     height: 100%;
-    gap: 0;
+    gap: 2px;
     grid-template-rows: repeat(4, minmax(0, 1fr));
   }
   .boardPreview .tile {
@@ -1291,6 +1299,9 @@ header {
   }
   .boardPreview .tile:hover {
     transform: none;
+  }
+  .boardPreview .tile.placeholder {
+    box-shadow: inset 0 0 0 3px #ffbd2e;
   }
   .status {
     min-height: 24px;
@@ -1450,7 +1461,7 @@ header {
       0 19px 24px rgba(0, 0, 0, 0.15);
   }
   .boardPreview .tiles {
-    gap: 0;
+    gap: 2px;
   }
   .boardPreview .tile {
     border-radius: 0;
@@ -1458,6 +1469,9 @@ header {
   }
   .boardPreview .tile:hover {
     transform: none;
+  }
+  .boardPreview .tile.placeholder {
+    box-shadow: inset 0 0 0 3px #ffbd2e;
   }
   .status {
     margin-top: 8px;
