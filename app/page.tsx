@@ -3,6 +3,7 @@
 import {
   ChangeEvent,
   FormEvent,
+  PointerEvent,
   useEffect,
   useMemo,
   useRef,
@@ -25,8 +26,7 @@ const COLS = 4,
   GRID = 256,
   TILE_COUNT = COLS * ROWS,
   TILE_TOP_MM = 25,
-  BOARD_TERRAIN_RIM_MM = 5,
-  BASE_RELIEF_MM = 8;
+  BOARD_TERRAIN_RIM_MM = 5;
 
 type SavedProject = {
   version: 1;
@@ -35,6 +35,8 @@ type SavedProject = {
   lon: string;
   span: string;
   verticalModifier: string;
+  elevationRangeM: number;
+  terrainSpanKm: number;
   selected: number;
   placeholderIndex: number | null;
   elevation: number[];
@@ -438,16 +440,24 @@ function MapPicker({
   areaKm: number;
   onPick: (latitude: number, longitude: number) => void;
 }) {
-  const [zoom, setZoom] = useState(12),
+  const [zoom, setZoom] = useState(11),
     [query, setQuery] = useState(""),
     [results, setResults] = useState<
       { display_name: string; lat: string; lon: string }[]
     >([]),
     [searching, setSearching] = useState(false),
-    [view, setView] = useState({ latitude, longitude });
+    [view, setView] = useState({ latitude, longitude }),
+    [fullscreen, setFullscreen] = useState(false);
+  const drag = useRef<{
+    x: number;
+    y: number;
+    viewX: number;
+    viewY: number;
+    moved: boolean;
+  } | null>(null);
   useEffect(() => {
-    setView({ latitude, longitude });
-  }, [latitude, longitude]);
+    if (!fullscreen) setView({ latitude, longitude });
+  }, [fullscreen, latitude, longitude]);
   const x = tileX(view.longitude, zoom),
     y = tileY(view.latitude, zoom),
     selectedX = tileX(longitude, zoom),
@@ -455,14 +465,16 @@ function MapPicker({
     world = 256 * 2 ** zoom;
   const tiles = useMemo(
     () =>
-      Array.from({ length: 25 }, (_, i) => {
-        const dx = (i % 5) - 2,
-          dy = Math.floor(i / 5) - 2,
+      Array.from({ length: (fullscreen ? 9 : 5) ** 2 }, (_, i) => {
+        const radius = fullscreen ? 4 : 2,
+          width = radius * 2 + 1,
+          dx = (i % width) - radius,
+          dy = Math.floor(i / width) - radius,
           tx = Math.floor(x) + dx,
           ty = Math.floor(y) + dy;
         return { id: `${zoom}-${tx}-${ty}`, tx, ty };
       }),
-    [x, y, zoom],
+    [fullscreen, x, y, zoom],
   );
   const halfSide = Math.max(
     16,
@@ -479,6 +491,38 @@ function MapPicker({
       (40075016.686 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180))) /
       (256 * 2 ** zoom),
     stepKm = Math.max(0.01, (metresPerPixel * 16) / 1000);
+  function setZoomAround(delta: number) {
+    setZoom((current) => Math.max(5, Math.min(16, current + delta)));
+  }
+  function pointAt(event: PointerEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect(),
+      mapX = x + (event.clientX - rect.left - rect.width / 2) / 256,
+      mapY = y + (event.clientY - rect.top - rect.height / 2) / 256;
+    return { latitude: latitudeAt(mapY, zoom), longitude: longitudeAt(mapX, zoom) };
+  }
+  function startDrag(event: PointerEvent<HTMLDivElement>) {
+    if (!fullscreen) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { x: event.clientX, y: event.clientY, viewX: x, viewY: y, moved: false };
+  }
+  function dragMap(event: PointerEvent<HTMLDivElement>) {
+    const current = drag.current;
+    if (!fullscreen || !current) return;
+    const dx = event.clientX - current.x,
+      dy = event.clientY - current.y;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) current.moved = true;
+    setView({
+      longitude: longitudeAt(current.viewX - dx / 256, zoom),
+      latitude: latitudeAt(current.viewY - dy / 256, zoom),
+    });
+  }
+  function finishDrag(event: PointerEvent<HTMLDivElement>) {
+    const current = drag.current;
+    drag.current = null;
+    if (!fullscreen || !current || current.moved) return;
+    const point = pointAt(event);
+    onPick(point.latitude, point.longitude);
+  }
   function move(direction: "north" | "south" | "east" | "west") {
     const latStep = stepKm / 111.32,
       lonStep =
@@ -511,6 +555,56 @@ function MapPicker({
       setSearching(false);
     }
   }
+  const surface = (isFullscreen: boolean) => (
+    <div
+      className={`mapSurface ${isFullscreen ? "mapSurfaceFullscreen" : ""}`}
+      role="application"
+      aria-label={isFullscreen ? "Topographic map. Drag to pan, scroll to zoom, click to choose terrain." : "Topographic map with the selected square."}
+      onWheel={
+        isFullscreen
+          ? (event) => {
+              event.preventDefault();
+              setZoomAround(event.deltaY < 0 ? 1 : -1);
+            }
+          : undefined
+      }
+      onPointerDown={startDrag}
+      onPointerMove={dragMap}
+      onPointerUp={finishDrag}
+    >
+      {tiles.map((t) => (
+        <img
+          key={t.id}
+          src={`https://${["a", "b", "c"][Math.abs(t.tx + t.ty) % 3]}.tile.opentopomap.org/${zoom}/${t.tx}/${t.ty}.png`}
+          alt=""
+          draggable="false"
+          style={{
+            left: `calc(50% + ${(t.tx - x) * 256}px)`,
+            top: `calc(50% + ${(t.ty - y) * 256}px)`,
+          }}
+        />
+      ))}
+      <span
+        className="areaBox"
+        style={{
+          width: halfSide * 2,
+          height: halfSide * 2,
+          left: `calc(50% + ${selectedLeft}px)`,
+          top: `calc(50% + ${selectedTop}px)`,
+        }}
+      />
+      <span
+        className="mapPin"
+        style={{
+          left: `calc(50% + ${selectedLeft}px)`,
+          top: `calc(50% + ${selectedTop}px)`,
+        }}
+      >
+        ●
+      </span>
+      <span className="mapAttribution">© OpenTopoMap · © OpenStreetMap</span>
+    </div>
+  );
   return (
     <div className="mapPicker">
       <form className="mapSearch" onSubmit={search}>
@@ -544,54 +638,18 @@ function MapPicker({
           ))}
         </div>
       )}
-      <div
-        className="mapSurface"
-        role="img"
-        aria-label="Static map with the selected square."
-      >
-        {tiles.map((t) => (
-          <img
-            key={t.id}
-            src={`https://${["a", "b", "c"][Math.abs(t.tx + t.ty) % 3]}.tile.opentopomap.org/${zoom}/${t.tx}/${t.ty}.png`}
-            alt=""
-            draggable="false"
-            style={{
-              left: `calc(50% + ${(t.tx - x) * 256}px)`,
-              top: `calc(50% + ${(t.ty - y) * 256}px)`,
-            }}
-          />
-        ))}
-        <span
-          className="areaBox"
-          style={{
-            width: halfSide * 2,
-            height: halfSide * 2,
-            left: `calc(50% + ${selectedLeft}px)`,
-            top: `calc(50% + ${selectedTop}px)`,
-          }}
-        />
-        <span
-          className="mapPin"
-          style={{
-            left: `calc(50% + ${selectedLeft}px)`,
-            top: `calc(50% + ${selectedTop}px)`,
-          }}
-        >
-          ●
-        </span>
-        <span className="mapAttribution">© OpenTopoMap · © OpenStreetMap</span>
-      </div>
+      {surface(false)}
       <div className="mapZoom">
         <button
           type="button"
-          onClick={() => setZoom((z) => Math.min(16, z + 1))}
+          onClick={() => setZoomAround(1)}
           aria-label="Zoom in"
         >
           +
         </button>
         <button
           type="button"
-          onClick={() => setZoom((z) => Math.max(5, z - 1))}
+          onClick={() => setZoomAround(-1)}
           aria-label="Zoom out"
         >
           −
@@ -632,8 +690,21 @@ function MapPicker({
         {stepKm < 1
           ? `${Math.round(stepKm * 1000)} m`
           : `${stepKm.toFixed(1)} km`}
-        . The selected square remains centered.
+        . Use the full-screen map when you want to pan freely.
       </p>
+      <button className="fullMapButton" type="button" onClick={() => setFullscreen(true)}>
+        Open full-screen map
+      </button>
+      {fullscreen && (
+        <div className="mapFullscreen" role="dialog" aria-modal="true" aria-label="Full-screen topographic map">
+          <div className="mapFullscreenBar">
+            <b>Topographic map</b>
+            <span>Drag to pan · scroll to zoom · click to choose the square</span>
+            <button type="button" onClick={() => setFullscreen(false)}>Close map</button>
+          </div>
+          {surface(true)}
+        </div>
+      )}
     </div>
   );
 }
@@ -714,6 +785,8 @@ export default function Home() {
     [placeholder, setPlaceholder] = useState<Template | null>(null),
     [dem, setDem] = useState<{ name: string; data: ArrayBuffer } | null>(null),
     [elevation, setElevation] = useState(DEFAULT_ELEVATION),
+    [elevationRangeM, setElevationRangeM] = useState(100),
+    [terrainSpanKm, setTerrainSpanKm] = useState(10),
     [selected, setSelected] = useState(12),
     [placeholderIndex, setPlaceholderIndex] = useState(() =>
       flattestCorner(DEFAULT_ELEVATION),
@@ -738,14 +811,11 @@ export default function Home() {
     selectedRow = Math.floor(selected / COLS) + 1,
     selectedCol = (selected % COLS) + 1,
     selectedPlaceholder = placeholderIndex === selected,
-    effectiveRelief = BASE_RELIEF_MM * Math.max(0.1, Number(verticalModifier) || 1),
-    totals = useMemo(
-      () => ({
-        regular: TILE_COUNT - (placeholderIndex === null ? 0 : 1),
-        placeholder: placeholderIndex === null ? 0 : 1,
-      }),
-      [placeholderIndex],
-    );
+    trueScaleRelief =
+      (elevationRangeM / Math.max(0.1, terrainSpanKm * 1000)) *
+      (COLS * TILE_TOP_MM),
+    effectiveRelief =
+      trueScaleRelief * Math.max(0.1, Number(verticalModifier) || 1);
   useEffect(() => {
     let cancelled = false;
     async function loadTemplates() {
@@ -876,6 +946,8 @@ export default function Home() {
         range = Math.max(1, high - low),
         normalized = samples.map((value) => (value - low) / range);
       setElevation(normalized);
+      setElevationRangeM(range);
+      setTerrainSpanKm(kilometres);
       setPlaceholderIndex(flattestCorner(normalized));
       setStatus(
         `Terrain loaded: ${Math.round(low)}–${Math.round(high)} m. The placeholder was set to the flattest corner.`,
@@ -913,6 +985,8 @@ export default function Home() {
         lon,
         span,
         verticalModifier,
+        elevationRangeM,
+        terrainSpanKm,
         selected,
         placeholderIndex,
         elevation,
@@ -943,6 +1017,16 @@ export default function Home() {
       setSpan(typeof saved.span === "string" ? saved.span : "2");
       setVerticalModifier(
         typeof saved.verticalModifier === "string" ? saved.verticalModifier : "1",
+      );
+      setElevationRangeM(
+        Number.isFinite(saved.elevationRangeM) && (saved.elevationRangeM as number) > 0
+          ? (saved.elevationRangeM as number)
+          : 100,
+      );
+      setTerrainSpanKm(
+        Number.isFinite(saved.terrainSpanKm) && (saved.terrainSpanKm as number) > 0
+          ? (saved.terrainSpanKm as number)
+          : Number(saved.span) || 10,
       );
       setSelected(
         Number.isInteger(saved.selected) &&
@@ -1032,25 +1116,18 @@ export default function Home() {
           <span className="mark">⌁</span>
           <div>
             <strong>Terrain Puzzle</strong>
-            <small>STL studio</small>
+            <small>4 × 4 printable map</small>
           </div>
         </div>
-        <div className="headerNote">4 × 4 terrain assembly</div>
+        <div className="headerNote">25 mm tiles · 100 mm map</div>
       </header>
       <section className="hero">
         <div>
-          <p className="eyebrow">FROM LANDSCAPE TO PRINTABLE PIECES</p>
-          <h1>Build a terrain puzzle that fits your board.</h1>
+          <p className="eyebrow">MAP · TILE LAYOUT · STL EXPORT</p>
+          <h1>Terrain puzzle builder</h1>
           <p className="lede">
-            Choose a landscape, review every cut piece, then export printable
-            STL files that fit your fixed puzzle set.
+            Choose an area, place the marker tile, then export your ready-to-print set.
           </p>
-        </div>
-        <div className="heroMetric">
-          <b>{totals.regular}</b>
-          <span>puzzle-base tiles</span>
-          <b>{totals.placeholder}</b>
-          <span>placeholder tile</span>
         </div>
       </section>
       <section className="workspace">
@@ -1058,15 +1135,15 @@ export default function Home() {
           <div className="step">
             <span>01</span>
             <div>
-              <h2>Terrain area</h2>
-              <p>Search anywhere, then use arrows to move the square.</p>
+              <h2>Map & terrain</h2>
+              <p>Search or open the map to choose your terrain square.</p>
             </div>
           </div>
           <div className="mapMount">
             <MapPicker
               latitude={Number(lat) || 30.81667}
               longitude={Number(lon) || 34.76667}
-              areaKm={Number(span) || 2}
+              areaKm={Math.max(0.1, Number(span) || 10)}
               onPick={(nextLat, nextLon) => {
                 setLat(nextLat.toFixed(5));
                 setLon(nextLon.toFixed(5));
@@ -1138,9 +1215,9 @@ export default function Home() {
         <section className="panel review">
           <div className="reviewHead">
             <div>
-              <p className="eyebrow">02 · REVIEW THE CUT</p>
-              <h2>Choose a piece</h2>
-              <p>Click a tile to decide whether it keeps the puzzle base.</p>
+              <p className="eyebrow">TILE LAYOUT</p>
+              <h2>Choose the marker tile</h2>
+              <p>Click a tile to move the fixed placeholder.</p>
             </div>
             <div className="legend">
               <i></i> puzzle tile <b>צ</b> placeholder
@@ -1170,7 +1247,7 @@ export default function Home() {
           </div>
         </section>
         <aside className="panel inspector">
-          <p className="eyebrow">SELECTED TILE</p>
+          <p className="eyebrow">SELECTED TILE & EXPORT</p>
           <h2>
             Tile {selectedRow}.{selectedCol}
           </h2>
@@ -1205,7 +1282,7 @@ export default function Home() {
             >
               <option value="0.25">×0.25 — very flat</option>
               <option value="0.5">×0.5 — flatter</option>
-              <option value="1">×1 — normal</option>
+              <option value="1">×1 — true scale</option>
               <option value="1.5">×1.5 — enhanced</option>
               <option value="2">×2 — strong</option>
               <option value="2.5">×2.5 — very strong</option>
@@ -1213,9 +1290,9 @@ export default function Home() {
             </select>
           </label>
           <p className="printNote">
-            Final printed height difference: {effectiveRelief.toFixed(1)} mm.
-            ×1 is 8 mm; ×0.5 is 4 mm; ×3 is 24 mm. Use a lower modifier for
-            flatter terrain.
+            ×1 is true vertical-to-horizontal scale: {trueScaleRelief.toFixed(2)}
+            mm from the {Math.round(elevationRangeM)} m terrain range across a
+            {terrainSpanKm} km map. Current output: {effectiveRelief.toFixed(2)} mm.
           </p>
           <div className="projectActions" aria-label="Project files">
             <button type="button" onClick={saveProject}>

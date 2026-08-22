@@ -872,3 +872,186 @@ header {
   opacity: 0.48;
   cursor: not-allowed;
 }
+
+/* Compact desktop workspace: the whole builder stays in one viewport. */
+@media (min-width: 980px) {
+  body {
+    overflow: hidden;
+  }
+  main {
+    height: 100vh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header {
+    height: 52px;
+    padding: 0 26px;
+    flex: none;
+  }
+  .brand strong {
+    font-size: 17px;
+  }
+  .mark {
+    width: 28px;
+    height: 28px;
+    font-size: 21px;
+  }
+  .hero {
+    display: block;
+    padding: 11px 26px 9px;
+    width: 100%;
+    max-width: 1560px;
+    flex: none;
+  }
+  .hero h1 {
+    font-size: 29px;
+    line-height: 1;
+  }
+  .eyebrow {
+    margin-bottom: 4px;
+    font-size: 9px;
+  }
+  .lede {
+    margin: 5px 0 0;
+    max-width: none;
+    font-size: 12px;
+  }
+  .workspace {
+    width: 100%;
+    max-width: 1560px;
+    min-height: 0;
+    flex: 1;
+    padding: 0 18px 14px;
+    grid-template-columns: 310px minmax(420px, 1fr) 300px;
+    gap: 10px;
+  }
+  .panel {
+    min-height: 0;
+    overflow: hidden;
+    border-radius: 13px;
+  }
+  .controls,
+  .inspector,
+  .review {
+    padding: 14px;
+  }
+  .step {
+    margin-bottom: 9px;
+  }
+  .step h2,
+  .review h2,
+  .inspector h2 {
+    font-size: 18px;
+  }
+  .mapSurface {
+    height: 180px;
+  }
+  .movePad {
+    margin: 5px 0 0;
+  }
+  .controls label,
+  .inspector > label {
+    margin: 7px 0;
+  }
+  .areaAdjust {
+    margin-bottom: 6px;
+  }
+  .primary {
+    margin-top: 6px;
+    padding: 10px;
+  }
+  .hint {
+    margin-top: 6px;
+  }
+  .reviewHead {
+    margin-bottom: 10px;
+  }
+  .boardPreview {
+    padding: 13px;
+  }
+  .tileDiagram {
+    height: 58px;
+    margin: 9px 0;
+  }
+  .choice p {
+    margin: 3px 0;
+  }
+  .projectActions {
+    margin: 8px 0 3px;
+  }
+  .status {
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+  .exports {
+    margin-top: 8px;
+  }
+  .printNote {
+    margin-top: 7px;
+  }
+}
+
+/* Overlap raster tiles slightly to eliminate occasional hairline seams. */
+.mapSurface img {
+  width: 257px;
+  height: 257px;
+  transform: translateZ(0);
+}
+.mapPin {
+  transform: translate(-50%, -50%);
+}
+.fullMapButton {
+  width: 100%;
+  margin-top: 7px;
+  border: 1px solid #86aaa1;
+  border-radius: 7px;
+  background: #edf5f1;
+  color: var(--deep);
+  padding: 8px;
+  font-size: 10px;
+  font-weight: 800;
+}
+.mapFullscreen {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: #153c3a;
+}
+.mapFullscreenBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: #fff;
+  font-size: 13px;
+}
+.mapFullscreenBar span {
+  flex: 1;
+  color: #d7ebe4;
+  font-size: 11px;
+}
+.mapFullscreenBar button {
+  border: 0;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--deep);
+  padding: 8px 11px;
+  font-weight: 800;
+}
+.mapSurfaceFullscreen {
+  height: auto !important;
+  min-height: 0;
+  flex: 1;
+  border-radius: 12px;
+  cursor: grab;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+.mapSurfaceFullscreen:active {
+  cursor: grabbing;
+}
