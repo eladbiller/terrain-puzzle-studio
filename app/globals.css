@@ -900,7 +900,7 @@ header {
   }
   .hero {
     display: block;
-    padding: 11px 26px 9px;
+    padding: 8px 26px 6px;
     width: 100%;
     max-width: 1560px;
     flex: none;
@@ -923,7 +923,7 @@ header {
     max-width: 1560px;
     min-height: 0;
     flex: 1;
-    padding: 0 18px 14px;
+    padding: 0 18px 26px;
     grid-template-columns: 310px minmax(420px, 1fr) 300px;
     gap: 10px;
   }

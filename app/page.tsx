@@ -873,7 +873,7 @@ export default function Home() {
       let samples: number[];
       if (dem) samples = await elevationFromGeoTiff(dem.data, region);
       else {
-        const zoom =
+        let zoom =
           kilometres <= 2
             ? 15
             : kilometres <= 5
@@ -887,16 +887,21 @@ export default function Home() {
                     : kilometres <= 160
                       ? 10
                       : 9;
-        const minX = tileX(minLon, zoom),
-          maxX = tileX(maxLon, zoom),
-          minY = tileY(maxLat, zoom),
-          maxY = tileY(minLat, zoom);
-        const keys: { x: number; y: number }[] = [];
-        for (let y = Math.floor(minY) - 1; y <= Math.floor(maxY) + 1; y += 1)
-          for (let x = Math.floor(minX) - 1; x <= Math.floor(maxX) + 1; x += 1)
-            keys.push({ x, y });
-        if (keys.length > 36)
-          throw new Error("Choose a smaller area for the dense terrain mesh.");
+        let keys: { x: number; y: number }[] = [];
+        // Use the most detailed source zoom that fits safely in one request.
+        // Larger map areas automatically step down only as far as necessary.
+        while (true) {
+          const minX = tileX(minLon, zoom),
+            maxX = tileX(maxLon, zoom),
+            minY = tileY(maxLat, zoom),
+            maxY = tileY(minLat, zoom);
+          keys = [];
+          for (let y = Math.floor(minY) - 1; y <= Math.floor(maxY) + 1; y += 1)
+            for (let x = Math.floor(minX) - 1; x <= Math.floor(maxX) + 1; x += 1)
+              keys.push({ x, y });
+          if (keys.length <= 36 || zoom <= 6) break;
+          zoom -= 1;
+        }
         const tiles = new Map<string, ImageData>();
         await Promise.all(
           keys.map(async (key) =>
