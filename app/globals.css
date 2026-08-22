@@ -832,6 +832,30 @@ header {
 .baseShape.placeholderBase {
   background: #e6bd48;
 }
+.projectActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin: 14px 0 4px;
+}
+.projectActions button,
+.projectLoad {
+  display: grid;
+  place-items: center;
+  min-height: 36px;
+  border: 1px solid #b9cec8;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--deep);
+  padding: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+}
+.projectLoad input {
+  display: none;
+}
 .download:disabled {
   opacity: 0.48;
   cursor: not-allowed;

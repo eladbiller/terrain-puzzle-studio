@@ -25,7 +25,20 @@ const COLS = 4,
   GRID = 256,
   TILE_COUNT = COLS * ROWS,
   TILE_TOP_MM = 25,
-  BOARD_TERRAIN_RIM_MM = 5;
+  BOARD_TERRAIN_RIM_MM = 5,
+  BASE_RELIEF_MM = 8;
+
+type SavedProject = {
+  version: 1;
+  puzzleName: string;
+  lat: string;
+  lon: string;
+  span: string;
+  verticalModifier: string;
+  selected: number;
+  placeholderIndex: number | null;
+  elevation: number[];
+};
 
 function boundsOfStl(buffer: ArrayBuffer): Bounds {
   const view = new DataView(buffer),
@@ -281,8 +294,8 @@ function terrainBoardTriangles(
     }
   return tris;
 }
-function download(name: string, data: ArrayBuffer) {
-  const url = URL.createObjectURL(new Blob([data], { type: "model/stl" })),
+function download(name: string, data: ArrayBuffer, type = "model/stl") {
+  const url = URL.createObjectURL(new Blob([data], { type })),
     anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = name;
@@ -681,7 +694,6 @@ export default function Home() {
     [lat, setLat] = useState("30.81667"),
     [lon, setLon] = useState("34.76667"),
     [span, setSpan] = useState("2"),
-    [relief, setRelief] = useState("8"),
     [verticalModifier, setVerticalModifier] = useState("1"),
     [puzzleName, setPuzzleName] = useState("terrain-puzzle"),
     [status, setStatus] = useState(
@@ -699,9 +711,7 @@ export default function Home() {
     selectedRow = Math.floor(selected / COLS) + 1,
     selectedCol = (selected % COLS) + 1,
     selectedPlaceholder = placeholderIndex === selected,
-    effectiveRelief =
-      Math.max(0.5, Number(relief) || 8) *
-      Math.max(0.1, Number(verticalModifier) || 1),
+    effectiveRelief = BASE_RELIEF_MM * Math.max(0.1, Number(verticalModifier) || 1),
     totals = useMemo(
       () => ({
         regular: TILE_COUNT - (placeholderIndex === null ? 0 : 1),
@@ -870,6 +880,69 @@ export default function Home() {
       );
       return String(next);
     });
+  }
+  function saveProject() {
+    const project: SavedProject = {
+        version: 1,
+        puzzleName,
+        lat,
+        lon,
+        span,
+        verticalModifier,
+        selected,
+        placeholderIndex,
+        elevation,
+      },
+      bytes = new TextEncoder().encode(JSON.stringify(project));
+    download(
+      `${fileStem(puzzleName)}.terrain-puzzle.json`,
+      bytes.buffer as ArrayBuffer,
+      "application/json",
+    );
+    setStatus("Project saved. Load this project file later to continue here.");
+  }
+  async function loadProject(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const saved = JSON.parse(await file.text()) as Partial<SavedProject>;
+      if (
+        saved.version !== 1 ||
+        !Array.isArray(saved.elevation) ||
+        saved.elevation.length !== (GRID + 1) ** 2 ||
+        !saved.elevation.every((value) => Number.isFinite(value))
+      )
+        throw new Error("This is not a valid Terrain Puzzle project file.");
+      setPuzzleName(typeof saved.puzzleName === "string" ? saved.puzzleName : "terrain-puzzle");
+      setLat(typeof saved.lat === "string" ? saved.lat : "30.81667");
+      setLon(typeof saved.lon === "string" ? saved.lon : "34.76667");
+      setSpan(typeof saved.span === "string" ? saved.span : "2");
+      setVerticalModifier(
+        typeof saved.verticalModifier === "string" ? saved.verticalModifier : "1",
+      );
+      setSelected(
+        Number.isInteger(saved.selected) &&
+          (saved.selected as number) >= 0 &&
+          (saved.selected as number) < TILE_COUNT
+          ? (saved.selected as number)
+          : 12,
+      );
+      setPlaceholderIndex(
+        Number.isInteger(saved.placeholderIndex) &&
+          (saved.placeholderIndex as number) >= 0 &&
+          (saved.placeholderIndex as number) < TILE_COUNT
+          ? (saved.placeholderIndex as number)
+          : null,
+      );
+      setElevation(saved.elevation);
+      setStatus(`Project “${file.name}” loaded. You can continue working.`);
+    } catch (error) {
+      setStatus(
+        error instanceof Error ? error.message : "Project file could not be loaded.",
+      );
+    } finally {
+      event.target.value = "";
+    }
   }
   function exportTile(index: number) {
     const isPlaceholder = placeholderIndex === index && Boolean(placeholder),
@@ -1105,18 +1178,7 @@ export default function Home() {
             )}
           </div>
           <label>
-            Base relief range <output>{relief} mm</output>
-            <input
-              type="range"
-              min="2"
-              max="20"
-              step="1"
-              value={relief}
-              onChange={(e) => setRelief(e.target.value)}
-            />
-          </label>
-          <label>
-            Vertical modifier <output>×{verticalModifier}</output>
+            Terrain height modifier <output>×{verticalModifier}</output>
             <select
               value={verticalModifier}
               onChange={(e) => setVerticalModifier(e.target.value)}
@@ -1126,13 +1188,27 @@ export default function Home() {
               <option value="1">×1 — normal</option>
               <option value="1.5">×1.5 — enhanced</option>
               <option value="2">×2 — strong</option>
+              <option value="2.5">×2.5 — very strong</option>
+              <option value="3">×3 — maximum</option>
             </select>
           </label>
           <p className="printNote">
-            Final height difference: {effectiveRelief.toFixed(1)} mm. Relief is
-            the printed height between the lowest and highest terrain; the
-            modifier scales it.
+            Final printed height difference: {effectiveRelief.toFixed(1)} mm.
+            Use a lower modifier for flatter terrain.
           </p>
+          <div className="projectActions" aria-label="Project files">
+            <button type="button" onClick={saveProject}>
+              Save project to computer
+            </button>
+            <label className="projectLoad">
+              <input
+                type="file"
+                accept=".json,.terrain-puzzle.json,application/json"
+                onChange={loadProject}
+              />
+              Load saved project
+            </label>
+          </div>
           <div className="exports">
             <button className="download" onClick={() => exportTile(selected)}>
               Download selected STL
