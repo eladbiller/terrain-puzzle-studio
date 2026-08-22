@@ -783,6 +783,128 @@ function TilePreview({
   );
 }
 
+function TerrainViewer({
+  values,
+  relief,
+  modifier,
+  onClose,
+}: {
+  values: number[];
+  relief: number;
+  modifier: string;
+  onClose: () => void;
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null),
+    drag = useRef<{ x: number; yaw: number } | null>(null),
+    [yaw, setYaw] = useState(-0.8),
+    [zoom, setZoom] = useState(1);
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect(),
+      ratio = Math.min(2, window.devicePixelRatio || 1),
+      width = Math.max(1, Math.round(rect.width * ratio)),
+      height = Math.max(1, Math.round(rect.height * ratio));
+    el.width = width;
+    el.height = height;
+    const context = el.getContext("2d");
+    if (!context) return;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, rect.width, rect.height);
+    context.fillStyle = "#e8f2ed";
+    context.fillRect(0, 0, rect.width, rect.height);
+    const cells = 48,
+      step = GRID / cells,
+      scale = (Math.min(rect.width, rect.height) / 150) * zoom,
+      cos = Math.cos(yaw),
+      sin = Math.sin(yaw),
+      point = (gridX: number, gridY: number) => {
+        const x = (gridX / GRID - 0.5) * 100,
+          north = (0.5 - gridY / GRID) * 100,
+          heightMm = (values[(GRID - gridY) * (GRID + 1) + gridX] ?? 0) * relief,
+          side = x * cos - north * sin,
+          depth = x * sin + north * cos;
+        return {
+          x: rect.width / 2 + side * scale,
+          y: rect.height * 0.62 + depth * scale * 0.35 - heightMm * scale * 1.5,
+          depth,
+          heightMm,
+        };
+      };
+    const faces: { points: ReturnType<typeof point>[]; depth: number; shade: number }[] = [];
+    for (let y = 0; y < cells; y += 1)
+      for (let x = 0; x < cells; x += 1) {
+        const a = point(x * step, y * step),
+          b = point((x + 1) * step, y * step),
+          c = point((x + 1) * step, (y + 1) * step),
+          d = point(x * step, (y + 1) * step),
+          averageHeight = (a.heightMm + b.heightMm + c.heightMm + d.heightMm) / 4;
+        faces.push({
+          points: [a, b, c, d],
+          depth: (a.depth + b.depth + c.depth + d.depth) / 4,
+          shade: Math.min(1, averageHeight / Math.max(0.01, relief)),
+        });
+      }
+    faces.sort((a, b) => a.depth - b.depth);
+    for (const face of faces) {
+      const [a, ...rest] = face.points;
+      context.beginPath();
+      context.moveTo(a.x, a.y);
+      for (const p of rest) context.lineTo(p.x, p.y);
+      context.closePath();
+      const light = Math.round(31 + face.shade * 28);
+      context.fillStyle = `rgb(${17 + Math.round(face.shade * 22)}, ${light + 48}, ${light + 39})`;
+      context.fill();
+    }
+    context.strokeStyle = "rgba(255,255,255,0.16)";
+    context.lineWidth = 0.55;
+    for (const face of faces) {
+      const [a, ...rest] = face.points;
+      context.beginPath();
+      context.moveTo(a.x, a.y);
+      for (const p of rest) context.lineTo(p.x, p.y);
+      context.closePath();
+      context.stroke();
+    }
+  }, [relief, values, yaw, zoom]);
+  return (
+    <div className="terrainViewer" role="dialog" aria-modal="true" aria-label="3D terrain viewer">
+      <div className="viewerPanel">
+        <div className="viewerHead">
+          <div>
+            <p className="eyebrow">LIVE TERRAIN PREVIEW</p>
+            <h2>3D terrain model</h2>
+          </div>
+          <button type="button" onClick={onClose}>Close</button>
+        </div>
+        <canvas
+          className="viewerCanvas"
+          ref={canvas}
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            drag.current = { x: event.clientX, yaw };
+          }}
+          onPointerMove={(event) => {
+            if (!drag.current) return;
+            setYaw(drag.current.yaw + (event.clientX - drag.current.x) / 180);
+          }}
+          onPointerUp={() => { drag.current = null; }}
+          onPointerCancel={() => { drag.current = null; }}
+          onWheel={(event) => {
+            event.preventDefault();
+            setZoom((current) => Math.max(0.65, Math.min(1.7, current + (event.deltaY < 0 ? 0.1 : -0.1))));
+          }}
+        />
+        <div className="viewerFooter">
+          <span>Height modifier ×{modifier}</span>
+          <b>{relief.toFixed(2)} mm maximum relief</b>
+          <small>Drag to rotate · scroll to zoom</small>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [tile, setTile] = useState<Template | null>(null),
     [board, setBoard] = useState<Template | null>(null),
@@ -800,6 +922,7 @@ export default function Home() {
     [span, setSpan] = useState("10"),
     [verticalModifier, setVerticalModifier] = useState("1"),
     [puzzleName, setPuzzleName] = useState("terrain-puzzle"),
+    [viewerOpen, setViewerOpen] = useState(false),
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
     );
@@ -1303,6 +1426,9 @@ export default function Home() {
             mm from the {Math.round(elevationRangeM)} m terrain range across a
             {terrainSpanKm} km map. Current output: {effectiveRelief.toFixed(2)} mm.
           </p>
+          <button className="viewerButton" type="button" onClick={() => setViewerOpen(true)}>
+            Open 3D terrain viewer
+          </button>
           <div className="projectActions" aria-label="Project files">
             <button type="button" onClick={saveProject}>
               Save project to computer
@@ -1340,6 +1466,14 @@ export default function Home() {
           </p>
         </aside>
       </section>
+      {viewerOpen && (
+        <TerrainViewer
+          values={elevation}
+          relief={effectiveRelief}
+          modifier={verticalModifier}
+          onClose={() => setViewerOpen(false)}
+        />
+      )}
     </main>
   );
 }

@@ -1056,6 +1056,84 @@ header {
   font-size: 10px;
   font-weight: 800;
 }
+.viewerButton {
+  width: 100%;
+  margin-top: 9px;
+  border: 1px solid #12665d;
+  border-radius: 8px;
+  background: #e6f1ed;
+  color: #0b3f41;
+  padding: 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.terrainViewer {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(7, 39, 40, 0.72);
+}
+.viewerPanel {
+  width: min(860px, 100%);
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fffefa;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.35);
+}
+.viewerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 17px 20px 13px;
+}
+.viewerHead .eyebrow {
+  margin-bottom: 4px;
+}
+.viewerHead h2 {
+  margin: 0;
+  font-size: 25px;
+  letter-spacing: -0.04em;
+}
+.viewerHead button {
+  border: 0;
+  border-radius: 7px;
+  background: #12665d;
+  color: #fff;
+  padding: 9px 13px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.viewerCanvas {
+  display: block;
+  width: 100%;
+  height: min(58vh, 530px);
+  border-top: 1px solid #d9e4e2;
+  border-bottom: 1px solid #d9e4e2;
+  cursor: grab;
+  touch-action: none;
+}
+.viewerCanvas:active {
+  cursor: grabbing;
+}
+.viewerFooter {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 13px 20px 16px;
+  color: #567578;
+  font-size: 12px;
+}
+.viewerFooter b {
+  color: #0b3f41;
+}
+.viewerFooter small {
+  margin-left: auto;
+  font-size: 11px;
+}
 .mapFullscreen {
   position: fixed;
   z-index: 100;
