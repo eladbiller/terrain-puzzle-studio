@@ -799,6 +799,16 @@ function TerrainViewer({
     [yaw, setYaw] = useState(-0.8),
     [zoom, setZoom] = useState(1);
   useEffect(() => {
+    const htmlOverflow = document.documentElement.style.overflow,
+      bodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.documentElement.style.overflow = htmlOverflow;
+      document.body.style.overflow = bodyOverflow;
+    };
+  }, []);
+  useEffect(() => {
     const el = canvas.current;
     if (!el) return;
     const rect = el.getBoundingClientRect(),
@@ -813,20 +823,38 @@ function TerrainViewer({
     context.clearRect(0, 0, rect.width, rect.height);
     context.fillStyle = "#e8f2ed";
     context.fillRect(0, 0, rect.width, rect.height);
-    const cells = 48,
+    const cells = 40,
       step = GRID / cells,
-      scale = (Math.min(rect.width, rect.height) / 150) * zoom,
+      scale = (Math.min(rect.width, rect.height) / 110) * zoom,
       cos = Math.cos(yaw),
       sin = Math.sin(yaw),
+      // The printable mesh remains unchanged. This small weighted average only
+      // makes the interactive display easy to read instead of showing every
+      // raw DEM sample as a sharp visual spike.
+      smoothHeight = (gridX: number, gridY: number) => {
+        let total = 0,
+          weight = 0,
+          centerX = Math.round(gridX),
+          centerY = Math.round(GRID - gridY);
+        for (let dy = -3; dy <= 3; dy += 1)
+          for (let dx = -3; dx <= 3; dx += 1) {
+            const x = Math.max(0, Math.min(GRID, centerX + dx)),
+              y = Math.max(0, Math.min(GRID, centerY + dy)),
+              w = 4 - Math.max(Math.abs(dx), Math.abs(dy));
+            total += (values[y * (GRID + 1) + x] ?? 0) * w;
+            weight += w;
+          }
+        return total / Math.max(1, weight);
+      },
       point = (gridX: number, gridY: number) => {
         const x = (gridX / GRID - 0.5) * 100,
           north = (0.5 - gridY / GRID) * 100,
-          heightMm = (values[(GRID - gridY) * (GRID + 1) + gridX] ?? 0) * relief,
+          heightMm = smoothHeight(gridX, gridY) * relief,
           side = x * cos - north * sin,
           depth = x * sin + north * cos;
         return {
           x: rect.width / 2 + side * scale,
-          y: rect.height * 0.62 + depth * scale * 0.35 - heightMm * scale * 1.5,
+          y: rect.height * 0.62 + depth * scale * 0.35 - heightMm * scale,
           depth,
           heightMm,
         };
@@ -855,16 +883,6 @@ function TerrainViewer({
       const light = Math.round(31 + face.shade * 28);
       context.fillStyle = `rgb(${17 + Math.round(face.shade * 22)}, ${light + 48}, ${light + 39})`;
       context.fill();
-    }
-    context.strokeStyle = "rgba(255,255,255,0.16)";
-    context.lineWidth = 0.55;
-    for (const face of faces) {
-      const [a, ...rest] = face.points;
-      context.beginPath();
-      context.moveTo(a.x, a.y);
-      for (const p of rest) context.lineTo(p.x, p.y);
-      context.closePath();
-      context.stroke();
     }
   }, [relief, values, yaw, zoom]);
   return (
@@ -898,7 +916,7 @@ function TerrainViewer({
         <div className="viewerFooter">
           <span>Height modifier ×{modifier}</span>
           <b>{relief.toFixed(2)} mm maximum relief</b>
-          <small>Drag to rotate · scroll to zoom</small>
+          <small>Smooth display preview · drag to rotate · scroll to zoom</small>
         </div>
       </div>
     </div>
