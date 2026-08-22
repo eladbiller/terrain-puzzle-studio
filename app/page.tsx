@@ -858,6 +858,50 @@ function TilePreview({
   );
 }
 
+function BoardRimPreview({ values }: { values: number[] }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const size = 360;
+    el.width = size;
+    el.height = size;
+    const context = el.getContext("2d");
+    if (!context) return;
+    const image = context.createImageData(size, size);
+    for (let y = 0; y < size; y += 1)
+      for (let x = 0; x < size; x += 1) {
+        const h = Math.max(
+            0,
+            Math.min(
+              1,
+              sampleBoardTerrain(
+                values,
+                (x / size) * BOARD_TERRAIN_SIZE_MM,
+                (1 - y / size) * BOARD_TERRAIN_SIZE_MM,
+              ),
+            ),
+          ),
+          p = (y * size + x) * 4;
+        image.data[p] = 22 + h * 18;
+        image.data[p + 1] = 89 + h * 70;
+        image.data[p + 2] = 87 + h * 52;
+        image.data[p + 3] = 255;
+      }
+    context.putImageData(image, 0, 0);
+    context.globalAlpha = 0.22;
+    context.strokeStyle = "#d9e9df";
+    for (let i = 12; i < size; i += 18) {
+      context.beginPath();
+      context.moveTo(0, i);
+      context.quadraticCurveTo(size * 0.5, i - 10, size, i);
+      context.stroke();
+    }
+    context.globalAlpha = 1;
+  }, [values]);
+  return <canvas ref={canvas} className="boardRimPreview" aria-hidden="true" />;
+}
+
 function TerrainViewer({
   values,
   relief,
@@ -1444,7 +1488,7 @@ export default function Home() {
             className="boardPreview"
             aria-label="Assembled board preview with 5 millimetre terrain rim"
           >
-            <div className="boardRimPreview"></div>
+            <BoardRimPreview values={elevation} />
             <div className="tiles" aria-label="Terrain tile selection">
               {Array.from({ length: TILE_COUNT }, (_, i) => (
                 <TilePreview
