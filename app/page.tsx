@@ -1327,15 +1327,6 @@ export default function Home() {
         </div>
         <div className="headerNote">25 mm tiles · 100 mm map</div>
       </header>
-      <section className="hero">
-        <div>
-          <p className="eyebrow">MAP · TILE LAYOUT · STL EXPORT</p>
-          <h1>Terrain puzzle builder</h1>
-          <p className="lede">
-            Choose an area, place the marker tile, then export your ready-to-print set.
-          </p>
-        </div>
-      </section>
       <section className="workspace">
         <aside className="panel controls">
           <div className="step">
