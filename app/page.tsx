@@ -23,7 +23,9 @@ type Template = { name: string; data: ArrayBuffer; bounds: Bounds };
 const COLS = 4,
   ROWS = 4,
   GRID = 256,
-  TILE_COUNT = COLS * ROWS;
+  TILE_COUNT = COLS * ROWS,
+  TILE_TOP_MM = 25,
+  BOARD_TERRAIN_RIM_MM = 5;
 
 function boundsOfStl(buffer: ArrayBuffer): Bounds {
   const view = new DataView(buffer),
@@ -131,15 +133,15 @@ function terrainTriangles(
   const perTile = GRID / COLS,
     startX = col * perTile,
     startY = row * perTile,
-    width = bounds.maxX - bounds.minX,
-    depth = bounds.maxY - bounds.minY,
+    centerX = (bounds.minX + bounds.maxX) / 2,
+    centerY = (bounds.minY + bounds.maxY) / 2,
     support = terrainOnly ? Math.max(bounds.minZ, 0) + 1.2 : bounds.maxZ - 0.25,
     floor = terrainOnly ? support - 1.2 : support - 0.18;
   const at = (x: number, y: number) =>
     values[(startY + y) * (GRID + 1) + startX + x];
   const point = (x: number, y: number, bottom = false) => [
-    bounds.minX + (width * x) / perTile,
-    bounds.minY + (depth * y) / perTile,
+    centerX - TILE_TOP_MM / 2 + (TILE_TOP_MM * x) / perTile,
+    centerY - TILE_TOP_MM / 2 + (TILE_TOP_MM * y) / perTile,
     bottom ? floor : support + 0.22 + at(x, y) * relief,
   ];
   const tris: number[][] = [],
@@ -183,14 +185,13 @@ function terrainBoardTriangles(
   values: number[],
   bounds: Bounds,
   relief: number,
-  rimMm: number,
 ) {
   const width = bounds.maxX - bounds.minX,
     depth = bounds.maxY - bounds.minY,
     support = bounds.maxZ - 0.35,
     floor = support - 0.25,
-    rimX = Math.max(1, Math.min(width / 2 - 1, rimMm)) / width,
-    rimY = Math.max(1, Math.min(depth / 2 - 1, rimMm)) / depth;
+    rimX = BOARD_TERRAIN_RIM_MM / width,
+    rimY = BOARD_TERRAIN_RIM_MM / depth;
   const point = (x: number, y: number, bottom = false) => [
     bounds.minX + (width * x) / GRID,
     bounds.minY + (depth * y) / GRID,
@@ -342,11 +343,13 @@ function MapPicker({
   latitude,
   longitude,
   areaKm,
+  moveStepKm,
   onPick,
 }: {
   latitude: number;
   longitude: number;
   areaKm: number;
+  moveStepKm: number;
   onPick: (latitude: number, longitude: number) => void;
 }) {
   const [zoom, setZoom] = useState(12),
@@ -383,7 +386,7 @@ function MapPicker({
   );
   const selectedLeft = (selectedX - x) * 256,
     selectedTop = (selectedY - y) * 256,
-    stepKm = Math.max(0.05, areaKm / 4);
+    stepKm = Math.max(0.01, moveStepKm);
   function move(direction: "north" | "south" | "east" | "west") {
     const latStep = stepKm / 111.32,
       lonStep =
@@ -622,8 +625,8 @@ export default function Home() {
     [lat, setLat] = useState("30.81667"),
     [lon, setLon] = useState("34.76667"),
     [span, setSpan] = useState("2"),
+    [moveStep, setMoveStep] = useState("0.1"),
     [relief, setRelief] = useState("8"),
-    [boardRim, setBoardRim] = useState("2.6"),
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
     );
@@ -697,9 +700,15 @@ export default function Home() {
             ? 15
             : kilometres <= 5
               ? 14
-              : kilometres <= 10
+              : kilometres <= 12
                 ? 13
-                : 12;
+                : kilometres <= 30
+                  ? 12
+                  : kilometres <= 80
+                    ? 11
+                    : kilometres <= 160
+                      ? 10
+                      : 9;
         const minX = tileX(minLon, zoom),
           maxX = tileX(maxLon, zoom),
           minY = tileY(maxLat, zoom),
@@ -800,12 +809,7 @@ export default function Home() {
       return;
     }
     const reliefMm = Math.max(0.5, Number(relief) || 8),
-      terrain = terrainBoardTriangles(
-        elevation,
-        board.bounds,
-        reliefMm,
-        Math.max(1, Number(boardRim) || 2.6),
-      );
+      terrain = terrainBoardTriangles(elevation, board.bounds, reliefMm);
     download(
       "terrain-board-combined.stl",
       binaryStl([...readTriangles(board.data), ...terrain]),
@@ -915,6 +919,7 @@ export default function Home() {
               latitude={Number(lat) || 30.81667}
               longitude={Number(lon) || 34.76667}
               areaKm={Number(span) || 2}
+              moveStepKm={Number(moveStep) || 0.1}
               onPick={(nextLat, nextLon) => {
                 setLat(nextLat.toFixed(5));
                 setLon(nextLon.toFixed(5));
@@ -960,11 +965,25 @@ export default function Home() {
             <input
               type="range"
               min=".5"
-              max="20"
-              step=".5"
+              max="200"
+              step="1"
               value={span}
               onChange={(e) => setSpan(e.target.value)}
             />
+          </label>
+          <label>
+            Arrow step
+            <select
+              value={moveStep}
+              onChange={(e) => setMoveStep(e.target.value)}
+            >
+              <option value="0.025">25 m — extra small</option>
+              <option value="0.05">50 m</option>
+              <option value="0.1">100 m</option>
+              <option value="0.25">250 m</option>
+              <option value="0.5">500 m</option>
+              <option value="1">1 km</option>
+            </select>
           </label>
           <button className="primary" onClick={fetchElevation}>
             Fetch & slice terrain <span>→</span>
@@ -985,17 +1004,23 @@ export default function Home() {
               <i></i> standard <i className="outline"></i> terrain only
             </div>
           </div>
-          <div className="tiles" aria-label="Terrain tile selection">
-            {Array.from({ length: TILE_COUNT }, (_, i) => (
-              <TilePreview
-                key={i}
-                index={i}
-                selected={i === selected}
-                terrainOnly={terrainOnly.has(i)}
-                values={elevation}
-                onClick={() => setSelected(i)}
-              />
-            ))}
+          <div
+            className="boardPreview"
+            aria-label="Assembled board preview with 5 millimetre terrain rim"
+          >
+            <div className="boardRimPreview"></div>
+            <div className="tiles" aria-label="Terrain tile selection">
+              {Array.from({ length: TILE_COUNT }, (_, i) => (
+                <TilePreview
+                  key={i}
+                  index={i}
+                  selected={i === selected}
+                  terrainOnly={terrainOnly.has(i)}
+                  values={elevation}
+                  onClick={() => setSelected(i)}
+                />
+              ))}
+            </div>
           </div>
           <div className="status" role="status">
             <span></span>
@@ -1033,19 +1058,6 @@ export default function Home() {
               onChange={(e) => setRelief(e.target.value)}
             />
           </label>
-          {board && (
-            <label>
-              Board terrain rim <output>{boardRim} mm</output>
-              <input
-                type="range"
-                min="1"
-                max="8"
-                step=".2"
-                value={boardRim}
-                onChange={(e) => setBoardRim(e.target.value)}
-              />
-            </label>
-          )}
           <div className="exports">
             <button className="download" onClick={() => exportTile(selected)}>
               Download selected STL
@@ -1064,9 +1076,9 @@ export default function Home() {
             </button>
           </div>
           <p className="printNote">
-            The board export places terrain only on its outer rim. The centre
-            remains blank for the 4 × 4 pieces, with the rim width setting
-            creating the clearance gap.
+            The board export has a fixed 5 mm terrain rim. Its 100.2 × 100.2 mm
+            opening leaves 0.1 mm clearance around the 100 × 100 mm tile
+            surface.
           </p>
         </aside>
       </section>

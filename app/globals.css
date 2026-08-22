@@ -252,6 +252,16 @@ header {
   margin-top: 5px;
   font-size: 12px;
 }
+.controls select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 9px;
+  margin-top: 5px;
+  font-size: 12px;
+}
 .controls input[type="range"],
 .inspector input[type="range"] {
   width: 100%;
@@ -328,6 +338,33 @@ header {
   gap: 10px;
   max-width: 640px;
   margin: auto;
+}
+.boardPreview {
+  position: relative;
+  max-width: 680px;
+  margin: auto;
+  padding: 20px;
+  border-radius: 12px;
+  background: #12534e;
+  box-shadow:
+    0 8px 0 #0b423f,
+    0 13px 20px rgba(0, 0, 0, 0.13);
+}
+.boardRimPreview {
+  position: absolute;
+  inset: 0;
+  border: 5px solid #267a70;
+  border-radius: 12px;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.16);
+}
+.boardPreview .tiles {
+  position: relative;
+  max-width: none;
+  gap: 3px;
+}
+.boardPreview .tile {
+  border-radius: 3px;
 }
 .tile {
   position: relative;
