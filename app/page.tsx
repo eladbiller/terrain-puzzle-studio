@@ -30,7 +30,11 @@ const COLS = 4,
   GRID = 256,
   TILE_COUNT = COLS * ROWS,
   TILE_TOP_MM = 25,
-  BOARD_TERRAIN_RIM_MM = 5;
+  BOARD_TERRAIN_RIM_MM = 5,
+  BOARD_CLEARANCE_MM = 0.1,
+  TILE_FIELD_MM = COLS * TILE_TOP_MM,
+  BOARD_TERRAIN_SIZE_MM = TILE_FIELD_MM + 2 * (BOARD_TERRAIN_RIM_MM + BOARD_CLEARANCE_MM),
+  TILE_FIELD_INSET_MM = BOARD_TERRAIN_RIM_MM + BOARD_CLEARANCE_MM;
 const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 type SavedProject = {
@@ -136,20 +140,49 @@ function repairElevationOutliers(values: number[]) {
   return repaired;
 }
 
+function sampleBoardTerrain(values: number[], eastMm: number, northMm: number) {
+  const x = Math.max(0, Math.min(GRID, (eastMm / BOARD_TERRAIN_SIZE_MM) * GRID)),
+    y = Math.max(0, Math.min(GRID, (1 - northMm / BOARD_TERRAIN_SIZE_MM) * GRID)),
+    x0 = Math.floor(x),
+    y0 = Math.floor(y),
+    x1 = Math.min(GRID, x0 + 1),
+    y1 = Math.min(GRID, y0 + 1),
+    dx = x - x0,
+    dy = y - y0,
+    at = (gridX: number, gridY: number) => values[gridY * (GRID + 1) + gridX] ?? 0,
+    top = at(x0, y0) * (1 - dx) + at(x1, y0) * dx,
+    bottom = at(x0, y1) * (1 - dx) + at(x1, y1) * dx;
+  return top * (1 - dy) + bottom * dy;
+}
+
+function sampleTileTerrain(
+  values: number[],
+  row: number,
+  col: number,
+  east: number,
+  north: number,
+) {
+  return sampleBoardTerrain(
+    values,
+    TILE_FIELD_INSET_MM + col * TILE_TOP_MM + east * TILE_TOP_MM,
+    TILE_FIELD_INSET_MM + (ROWS - row - 1) * TILE_TOP_MM + north * TILE_TOP_MM,
+  );
+}
+
 function flattestCorner(values: number[]) {
   const perTile = GRID / COLS,
     corners = [0, COLS - 1, (ROWS - 1) * COLS, TILE_COUNT - 1];
   const roughness = (index: number) => {
     const row = Math.floor(index / COLS),
-      col = index % COLS,
-      startX = col * perTile,
-      startY = row * perTile;
+      col = index % COLS;
     let total = 0;
     for (let y = 0; y < perTile; y += 1)
       for (let x = 0; x < perTile; x += 1) {
-        const point = values[(startY + y) * (GRID + 1) + startX + x];
-        total += Math.abs(point - values[(startY + y) * (GRID + 1) + startX + x + 1]);
-        total += Math.abs(point - values[(startY + y + 1) * (GRID + 1) + startX + x]);
+        const east = x / perTile,
+          north = y / perTile,
+          point = sampleTileTerrain(values, row, col, east, north);
+        total += Math.abs(point - sampleTileTerrain(values, row, col, (x + 1) / perTile, north));
+        total += Math.abs(point - sampleTileTerrain(values, row, col, east, (y + 1) / perTile));
       }
     return total;
   };
@@ -214,8 +247,6 @@ function terrainTriangles(
   supportOverride?: number,
 ) {
   const perTile = GRID / COLS,
-    startX = col * perTile,
-    startY = row * perTile,
     // The puzzle connectors extend unevenly on two sides. Terrain belongs on
     // the centered 25 × 25 mm printable top, not the connector envelope.
     centerX = 0,
@@ -224,11 +255,10 @@ function terrainTriangles(
       supportOverride ??
       (terrainOnly ? Math.max(bounds.minZ, 0) + 1.2 : bounds.maxZ - 0.25),
     floor = terrainOnly ? support - 1.2 : support - 0.18;
-  // Raster elevation rows run north-to-south, while the printed model's
-  // positive Y direction is north. Reverse only the row inside this tile so
-  // every exported piece matches the map's north–south orientation.
+  // The selected map covers the entire 110.2 mm board. Each tile samples only
+  // its 25 mm portion inside that board, leaving the surrounding data for the rim.
   const at = (x: number, y: number) =>
-    values[(startY + (perTile - y)) * (GRID + 1) + startX + x];
+    sampleTileTerrain(values, row, col, x / perTile, y / perTile);
   const point = (x: number, y: number, bottom = false) => [
     centerX - TILE_TOP_MM / 2 + (TILE_TOP_MM * x) / perTile,
     centerY - TILE_TOP_MM / 2 + (TILE_TOP_MM * y) / perTile,
@@ -278,16 +308,11 @@ function terrainPeak(
   relief: number,
   support: number,
 ) {
-  const perTile = GRID / COLS,
-    startX = col * perTile,
-    startY = row * perTile;
+  const perTile = GRID / COLS;
   let highest = 0;
   for (let y = 0; y <= perTile; y += 1)
     for (let x = 0; x <= perTile; x += 1)
-      highest = Math.max(
-        highest,
-        values[(startY + y) * (GRID + 1) + startX + x],
-      );
+      highest = Math.max(highest, sampleTileTerrain(values, row, col, x / perTile, y / perTile));
   return support + 0.22 + highest * relief;
 }
 
@@ -792,14 +817,9 @@ function TilePreview({
     el.height = size;
     const context = el.getContext("2d");
     if (!context) return;
-    const image = context.createImageData(size, size),
-      perTile = GRID / COLS;
+    const image = context.createImageData(size, size);
     const shade = (u: number, v: number) => {
-      const gx = col * perTile + u * perTile,
-        gy = row * perTile + v * perTile,
-        x = Math.max(0, Math.min(GRID, Math.round(gx))),
-        y = Math.max(0, Math.min(GRID, Math.round(gy))),
-        h = values[y * (GRID + 1) + x] ?? 0,
+      const h = sampleTileTerrain(values, row, col, u, 1 - v),
         n = Math.max(0, Math.min(1, h));
       return [22 + n * 18, 89 + n * 70, 87 + n * 52];
     };
@@ -880,7 +900,7 @@ function TerrainViewer({
     context.fillRect(0, 0, rect.width, rect.height);
     const cells = 40,
       step = GRID / cells,
-      scale = (Math.min(rect.width, rect.height) / 110) * zoom,
+      scale = (Math.min(rect.width, rect.height) / (BOARD_TERRAIN_SIZE_MM * 1.1)) * zoom,
       cos = Math.cos(yaw),
       sin = Math.sin(yaw),
       // The printable mesh remains unchanged. This small weighted average only
@@ -902,8 +922,8 @@ function TerrainViewer({
         return total / Math.max(1, weight);
       },
       point = (gridX: number, gridY: number) => {
-        const x = (gridX / GRID - 0.5) * 100,
-          north = (0.5 - gridY / GRID) * 100,
+        const x = (gridX / GRID - 0.5) * BOARD_TERRAIN_SIZE_MM,
+          north = (0.5 - gridY / GRID) * BOARD_TERRAIN_SIZE_MM,
           heightMm = smoothHeight(gridX, gridY) * relief,
           side = x * cos - north * sin,
           depth = x * sin + north * cos;
@@ -1013,7 +1033,7 @@ export default function Home() {
     selectedPlaceholder = placeholderIndex === selected,
     trueScaleRelief =
       (elevationRangeM / Math.max(0.1, terrainSpanKm * 1000)) *
-      (COLS * TILE_TOP_MM),
+      BOARD_TERRAIN_SIZE_MM,
     effectiveRelief =
       trueScaleRelief * Math.max(0.1, Number(verticalModifier) || 1);
   useEffect(() => {
@@ -1325,7 +1345,7 @@ export default function Home() {
             <small>4 × 4 printable map</small>
           </div>
         </div>
-        <div className="headerNote">25 mm tiles · 100 mm map</div>
+        <div className="headerNote">25 mm tiles · 110.2 mm terrain board</div>
       </header>
       <section className="workspace">
         <aside className="panel controls">
@@ -1369,7 +1389,7 @@ export default function Home() {
             </label>
           </div>
           <label>
-            Area width <output>{span} km</output>
+            Board map width <output>{span} km</output>
             <input
               type="range"
               min=".1"
