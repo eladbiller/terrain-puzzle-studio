@@ -96,6 +96,30 @@ function demoElevation(resolution = GRID) {
   return result;
 }
 
+const DEFAULT_ELEVATION = demoElevation();
+
+function flattestCorner(values: number[]) {
+  const perTile = GRID / COLS,
+    corners = [0, COLS - 1, (ROWS - 1) * COLS, TILE_COUNT - 1];
+  const roughness = (index: number) => {
+    const row = Math.floor(index / COLS),
+      col = index % COLS,
+      startX = col * perTile,
+      startY = row * perTile;
+    let total = 0;
+    for (let y = 0; y < perTile; y += 1)
+      for (let x = 0; x < perTile; x += 1) {
+        const point = values[(startY + y) * (GRID + 1) + startX + x];
+        total += Math.abs(point - values[(startY + y) * (GRID + 1) + startX + x + 1]);
+        total += Math.abs(point - values[(startY + y + 1) * (GRID + 1) + startX + x]);
+      }
+    return total;
+  };
+  return corners.reduce((flattest, candidate) =>
+    roughness(candidate) < roughness(flattest) ? candidate : flattest,
+  );
+}
+
 function readTriangles(buffer: ArrayBuffer) {
   const data = new DataView(buffer),
     faces = data.getUint32(80, true),
@@ -476,7 +500,7 @@ function MapPicker({
     setSearching(true);
     try {
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=il&q=${encodeURIComponent(query)}`,
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&q=${encodeURIComponent(query)}`,
         { headers: { Accept: "application/json" } },
       );
       if (!response.ok) throw new Error();
@@ -493,8 +517,8 @@ function MapPicker({
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search a place in Israel"
-          aria-label="Search a place in Israel"
+          placeholder="Search any place"
+          aria-label="Search any place"
         />
         <button type="submit">{searching ? "…" : "Search"}</button>
       </form>
@@ -528,7 +552,7 @@ function MapPicker({
         {tiles.map((t) => (
           <img
             key={t.id}
-            src={`https://tile.openstreetmap.org/${zoom}/${t.tx}/${t.ty}.png`}
+            src={`https://${["a", "b", "c"][Math.abs(t.tx + t.ty) % 3]}.tile.opentopomap.org/${zoom}/${t.tx}/${t.ty}.png`}
             alt=""
             draggable="false"
             style={{
@@ -555,6 +579,7 @@ function MapPicker({
         >
           ●
         </span>
+        <span className="mapAttribution">© OpenTopoMap · © OpenStreetMap</span>
       </div>
       <div className="mapZoom">
         <button
@@ -688,12 +713,14 @@ export default function Home() {
     [board, setBoard] = useState<Template | null>(null),
     [placeholder, setPlaceholder] = useState<Template | null>(null),
     [dem, setDem] = useState<{ name: string; data: ArrayBuffer } | null>(null),
-    [elevation, setElevation] = useState(() => demoElevation()),
+    [elevation, setElevation] = useState(DEFAULT_ELEVATION),
     [selected, setSelected] = useState(12),
-    [placeholderIndex, setPlaceholderIndex] = useState<number | null>(null),
+    [placeholderIndex, setPlaceholderIndex] = useState(() =>
+      flattestCorner(DEFAULT_ELEVATION),
+    ),
     [lat, setLat] = useState("30.81667"),
     [lon, setLon] = useState("34.76667"),
-    [span, setSpan] = useState("2"),
+    [span, setSpan] = useState("10"),
     [verticalModifier, setVerticalModifier] = useState("1"),
     [puzzleName, setPuzzleName] = useState("terrain-puzzle"),
     [status, setStatus] = useState(
@@ -846,10 +873,12 @@ export default function Home() {
       }
       const low = Math.min(...samples),
         high = Math.max(...samples),
-        range = Math.max(1, high - low);
-      setElevation(samples.map((value) => (value - low) / range));
+        range = Math.max(1, high - low),
+        normalized = samples.map((value) => (value - low) / range);
+      setElevation(normalized);
+      setPlaceholderIndex(flattestCorner(normalized));
       setStatus(
-        `${dem ? dem.name : "Terrain"} loaded: ${Math.round(low)}–${Math.round(high)} m. Select any tile to change its base.`,
+        `Terrain loaded: ${Math.round(low)}–${Math.round(high)} m. The placeholder was set to the flattest corner.`,
       );
     } catch (error) {
       setStatus(
@@ -857,19 +886,14 @@ export default function Home() {
       );
     }
   }
-  function togglePlaceholder() {
+  function movePlaceholder() {
     if (!placeholder) {
       setStatus("The built-in placeholder tile is still loading.");
       return;
     }
-    if (selectedPlaceholder) {
-      setPlaceholderIndex(null);
-      setStatus(`Placeholder removed from tile ${selectedRow}.${selectedCol}.`);
-      return;
-    }
     setPlaceholderIndex(selected);
     setStatus(
-      `Tile ${selectedRow}.${selectedCol} is now the placeholder. Its צ stays 1 mm above this tile's highest terrain.`,
+      `Placeholder moved to tile ${selectedRow}.${selectedCol}. Its צ stays 1 mm above this tile's highest terrain.`,
     );
   }
   function adjustArea(delta: number) {
@@ -932,7 +956,7 @@ export default function Home() {
           (saved.placeholderIndex as number) >= 0 &&
           (saved.placeholderIndex as number) < TILE_COUNT
           ? (saved.placeholderIndex as number)
-          : null,
+          : flattestCorner(saved.elevation),
       );
       setElevation(saved.elevation);
       setStatus(`Project “${file.name}” loaded. You can continue working.`);
@@ -1035,7 +1059,7 @@ export default function Home() {
             <span>01</span>
             <div>
               <h2>Terrain area</h2>
-              <p>Search for a place, then use arrows to move the square.</p>
+              <p>Search anywhere, then use arrows to move the square.</p>
             </div>
           </div>
           <div className="mapMount">
@@ -1166,14 +1190,10 @@ export default function Home() {
                 : "Terrain overlaps the template top by 0.25 mm for a slicer-ready combined STL."}
             </p>
             {selectedPlaceholder ? (
-              <button className="toggle placeholderToggle" onClick={togglePlaceholder}>
-                Remove placeholder
-              </button>
+              <p className="printNote">This is the fixed placeholder position.</p>
             ) : (
-              <button className="toggle placeholderToggle" onClick={togglePlaceholder}>
-                {placeholderIndex === null
-                  ? "Use placeholder for this tile"
-                  : "Move placeholder here"}
+              <button className="toggle placeholderToggle" onClick={movePlaceholder}>
+                Move placeholder here
               </button>
             )}
           </div>
@@ -1194,7 +1214,8 @@ export default function Home() {
           </label>
           <p className="printNote">
             Final printed height difference: {effectiveRelief.toFixed(1)} mm.
-            Use a lower modifier for flatter terrain.
+            ×1 is 8 mm; ×0.5 is 4 mm; ×3 is 24 mm. Use a lower modifier for
+            flatter terrain.
           </p>
           <div className="projectActions" aria-label="Project files">
             <button type="button" onClick={saveProject}>

@@ -639,6 +639,18 @@ header {
   font-family: serif;
   pointer-events: none;
 }
+.mapAttribution {
+  position: absolute;
+  right: 5px;
+  bottom: 3px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #314a46;
+  font-size: 8px;
+  line-height: 1.2;
+  pointer-events: none;
+}
 .areaRing {
   position: absolute;
   left: 50%;
