@@ -359,7 +359,8 @@ header {
   position: relative;
   max-width: 680px;
   margin: auto;
-  padding: 5%;
+  /* (110.2 - 100) / 2 ÷ 110.2: the real 5.1 mm rim proportion. */
+  padding: calc(4.63% - 2px);
   border-radius: 12px;
   background: #12534e;
   box-shadow:
@@ -381,7 +382,6 @@ header {
   max-width: none;
   gap: 3px;
   z-index: 1;
-  box-shadow: 0 0 0 2px rgba(7, 58, 55, 0.78);
 }
 .boardPreview .tile {
   border-radius: 3px;
@@ -1197,7 +1197,7 @@ header {
   .controls,
   .inspector,
   .review {
-    padding: 5%;
+    padding: calc(4.63% - 2px);
     overflow: hidden;
   }
   .step {
@@ -1286,7 +1286,7 @@ header {
     flex: none;
     display: grid;
     place-items: stretch;
-    padding: 5%;
+    padding: calc(4.63% - 2px);
     box-shadow:
       0 14px 0 #0b423f,
       0 19px 24px rgba(0, 0, 0, 0.15);
@@ -1459,7 +1459,7 @@ header {
   }
   .boardPreview {
     width: min(100%, 680px, calc(100dvh - 155px));
-    padding: 5%;
+    padding: calc(4.63% - 2px);
     box-shadow:
       0 14px 0 #0b423f,
       0 19px 24px rgba(0, 0, 0, 0.15);
