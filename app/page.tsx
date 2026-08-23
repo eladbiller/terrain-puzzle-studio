@@ -574,7 +574,13 @@ function MapPicker({
     y = tileY(view.latitude, zoom),
     selectedX = tileX(longitude, zoom),
     selectedY = tileY(latitude, zoom),
-    world = 256 * 2 ** zoom;
+    selectedRegion = terrainRegion(latitude, longitude, areaKm),
+    selectionWest = tileX(selectedRegion.minLon, zoom),
+    selectionEast = tileX(selectedRegion.maxLon, zoom),
+    selectionNorth = tileY(selectedRegion.maxLat, zoom),
+    selectionSouth = tileY(selectedRegion.minLat, zoom),
+    selectionWidth = (selectionEast - selectionWest) * 256,
+    selectionHeight = (selectionSouth - selectionNorth) * 256;
   const tiles = useMemo(
     () =>
       Array.from({ length: (fullscreen ? 9 : 5) ** 2 }, (_, i) => {
@@ -588,17 +594,10 @@ function MapPicker({
       }),
     [fullscreen, x, y, zoom],
   );
-  const halfSide = Math.max(
-    16,
-    Math.min(
-      110,
-      (areaKm * world) /
-        (40075 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180))) /
-        2,
-    ),
-  );
   const selectedLeft = (selectedX - x) * 256,
     selectedTop = (selectedY - y) * 256,
+    selectionLeft = (selectionWest - x) * 256,
+    selectionTop = (selectionNorth - y) * 256,
     metresPerPixel =
       (40075016.686 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180))) /
       (256 * 2 ** zoom),
@@ -709,10 +708,10 @@ function MapPicker({
       <span
         className="areaBox"
         style={{
-          width: halfSide * 2,
-          height: halfSide * 2,
-          left: `calc(50% + ${selectedLeft}px)`,
-          top: `calc(50% + ${selectedTop}px)`,
+          width: selectionWidth,
+          height: selectionHeight,
+          left: `calc(50% + ${selectionLeft}px)`,
+          top: `calc(50% + ${selectionTop}px)`,
         }}
       />
       <span

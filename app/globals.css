@@ -802,7 +802,6 @@ header {
 }
 .areaBox {
   position: absolute;
-  transform: translate(-50%, -50%);
   border: 3px solid #6d19ae;
   background: rgba(109, 25, 174, 0.13);
   box-shadow:
