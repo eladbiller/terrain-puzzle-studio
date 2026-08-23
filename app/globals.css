@@ -357,10 +357,13 @@ header {
 }
 .boardPreview {
   position: relative;
+  width: min(100%, 680px);
   max-width: 680px;
   margin: auto;
-  /* (110.2 - 100) / 2 ÷ 110.2: the real 5.1 mm rim proportion. */
-  padding: calc(4.63% - 2px);
+  aspect-ratio: 1;
+  /* The printable board is 110.2 mm outside-to-outside. Its terrain rim is
+     exactly 5 mm, then its 100.2 mm opening leaves 0.1 mm around the tiles. */
+  padding: 0;
   border-radius: 12px;
   background: #12534e;
   box-shadow:
@@ -377,13 +380,22 @@ header {
   pointer-events: none;
   box-shadow: inset 0 0 0 3px #75c8ba;
 }
+.tileOpening {
+  position: absolute;
+  inset: 4.5372%; /* 5 mm ÷ 110.2 mm: the physical board rim only. */
+  z-index: 1;
+  display: block;
+  padding: max(0.5px, 0.1%); /* the separate 0.1 mm tile clearance */
+  background: #eff6f3;
+}
 .boardPreview .tiles {
   position: relative;
+  width: 100%;
+  height: 100%;
   max-width: none;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
   gap: 3px;
-  z-index: 1;
-  /* Preview-only clearance so the real 0.1 mm fit is visible on screen. */
-  box-shadow: 0 0 0 3px #eff6f3;
 }
 .boardPreview .tile {
   border-radius: 3px;
@@ -1288,7 +1300,7 @@ header {
     flex: none;
     display: grid;
     place-items: stretch;
-    padding: calc(4.63% - 2px);
+    padding: 0;
     box-shadow:
       0 14px 0 #0b423f,
       0 19px 24px rgba(0, 0, 0, 0.15);
@@ -1461,7 +1473,7 @@ header {
   }
   .boardPreview {
     width: min(100%, 680px, calc(100dvh - 155px));
-    padding: calc(4.63% - 2px);
+    padding: 0;
     box-shadow:
       0 14px 0 #0b423f,
       0 19px 24px rgba(0, 0, 0, 0.15);

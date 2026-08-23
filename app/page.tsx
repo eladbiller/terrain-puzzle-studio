@@ -337,48 +337,76 @@ function terrainBoardTriangles(
     floor = support - 0.25,
     rimX = BOARD_TERRAIN_RIM_MM / width,
     rimY = BOARD_TERRAIN_RIM_MM / depth;
+  // Insert the physical inner rim edge into the mesh. A whole-grid-cell ring
+  // would otherwise extend the 5 mm rim by up to one 0.43 mm sample cell.
+  const axisWithRimEdge = (edge: number) =>
+    Array.from({ length: GRID + 1 }, (_, index) => index)
+      .concat(edge * GRID, GRID - edge * GRID)
+      .sort((a, b) => a - b)
+      .filter((value, index, axis) => index === 0 || value - axis[index - 1] > 1e-6);
+  const xAxis = axisWithRimEdge(rimX),
+    yAxis = axisWithRimEdge(rimY);
   const point = (x: number, y: number, bottom = false) => [
     bounds.minX + (width * x) / GRID,
     bounds.minY + (depth * y) / GRID,
-    // Same north–south correction as the individual terrain pieces.
-    bottom ? floor : support + values[(GRID - y) * (GRID + 1) + x] * relief,
+    // All exported meshes use +Y as north. sampleBoardTerrain also powers
+    // the map and canvas previews, keeping north/south identical everywhere.
+    bottom
+      ? floor
+      : support +
+        sampleBoardTerrain(
+          values,
+          (x / GRID) * BOARD_TERRAIN_SIZE_MM,
+          (y / GRID) * BOARD_TERRAIN_SIZE_MM,
+        ) *
+          relief,
   ];
   const tris: number[][] = [],
     add = (a: number[], b: number[], c: number[]) =>
       tris.push([...a, ...b, ...c]);
-  const isRing = (x: number, y: number) => {
-    const u = (x + 0.5) / GRID,
-      v = (y + 0.5) / GRID;
+  const isRing = (u: number, v: number) => {
     return u < rimX || u > 1 - rimX || v < rimY || v > 1 - rimY;
   };
-  for (let y = 0; y < GRID; y += 1)
-    for (let x = 0; x < GRID; x += 1) {
-      if (!isRing(x, y)) continue;
-      const a = point(x, y),
-        b = point(x + 1, y),
-        c = point(x + 1, y + 1),
-        d = point(x, y + 1),
-        ab = point(x, y, true),
-        bb = point(x + 1, y, true),
-        cb = point(x + 1, y + 1, true),
-        db = point(x, y + 1, true);
+  const isRingCell = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= xAxis.length - 1 || y >= yAxis.length - 1)
+      return false;
+    return isRing(
+      (xAxis[x] + xAxis[x + 1]) / (2 * GRID),
+      (yAxis[y] + yAxis[y + 1]) / (2 * GRID),
+    );
+  };
+  for (let y = 0; y < yAxis.length - 1; y += 1)
+    for (let x = 0; x < xAxis.length - 1; x += 1) {
+      if (!isRingCell(x, y)) continue;
+      const x0 = xAxis[x],
+        x1 = xAxis[x + 1],
+        y0 = yAxis[y],
+        y1 = yAxis[y + 1],
+        a = point(x0, y0),
+        b = point(x1, y0),
+        c = point(x1, y1),
+        d = point(x0, y1),
+        ab = point(x0, y0, true),
+        bb = point(x1, y0, true),
+        cb = point(x1, y1, true),
+        db = point(x0, y1, true);
       add(a, b, c);
       add(a, c, d);
       add(ab, cb, bb);
       add(ab, db, cb);
-      if (y === 0 || !isRing(x, y - 1)) {
+      if (!isRingCell(x, y - 1)) {
         add(ab, b, bb);
         add(ab, a, b);
       }
-      if (y === GRID - 1 || !isRing(x, y + 1)) {
+      if (!isRingCell(x, y + 1)) {
         add(db, cb, c);
         add(db, c, d);
       }
-      if (x === 0 || !isRing(x - 1, y)) {
+      if (!isRingCell(x - 1, y)) {
         add(ab, db, d);
         add(ab, d, a);
       }
-      if (x === GRID - 1 || !isRing(x + 1, y)) {
+      if (!isRingCell(x + 1, y)) {
         add(bb, c, cb);
         add(bb, b, c);
       }
@@ -1489,17 +1517,19 @@ export default function Home() {
             aria-label="Assembled board preview with 5 millimetre terrain rim"
           >
             <BoardRimPreview values={elevation} />
-            <div className="tiles" aria-label="Terrain tile selection">
-              {Array.from({ length: TILE_COUNT }, (_, i) => (
-                <TilePreview
-                  key={i}
-                  index={i}
-                  selected={i === selected}
-                  placeholder={placeholderIndex === i}
-                  values={elevation}
-                  onClick={() => setSelected(i)}
-                />
-              ))}
+            <div className="tileOpening">
+              <div className="tiles" aria-label="Terrain tile selection">
+                {Array.from({ length: TILE_COUNT }, (_, i) => (
+                  <TilePreview
+                    key={i}
+                    index={i}
+                    selected={i === selected}
+                    placeholder={placeholderIndex === i}
+                    values={elevation}
+                    onClick={() => setSelected(i)}
+                  />
+                ))}
+              </div>
             </div>
           </div>
           <div className="status" role="status">
