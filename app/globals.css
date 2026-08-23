@@ -361,8 +361,8 @@ header {
   max-width: 680px;
   margin: auto;
   aspect-ratio: 1;
-  /* The printable board is 110.2 mm outside-to-outside. Its terrain rim is
-     exactly 5 mm, then its 100.2 mm opening leaves 0.1 mm around the tiles. */
+  /* The printable board is 110.3 mm outside-to-outside. Its terrain rim is
+     exactly 5 mm, then its 100.3 mm opening leaves 0.15 mm around the tiles. */
   padding: 0;
   border-radius: 12px;
   background: #12534e;
@@ -382,10 +382,10 @@ header {
 }
 .tileOpening {
   position: absolute;
-  inset: 4.5372%; /* 5 mm ÷ 110.2 mm: the physical board rim only. */
+  inset: 4.5331%; /* 5 mm ÷ 110.3 mm: the physical board rim only. */
   z-index: 1;
   display: block;
-  padding: max(0.5px, 0.1%); /* the separate 0.1 mm tile clearance */
+  padding: max(0.75px, 0.15%); /* the separate 0.15 mm tile clearance */
   background: #eff6f3;
 }
 .boardPreview .tiles {

@@ -31,7 +31,7 @@ const COLS = 4,
   TILE_COUNT = COLS * ROWS,
   TILE_TOP_MM = 25,
   BOARD_TERRAIN_RIM_MM = 5,
-  BOARD_CLEARANCE_MM = 0.1,
+  BOARD_CLEARANCE_MM = 0.15,
   TILE_FIELD_MM = COLS * TILE_TOP_MM,
   BOARD_TERRAIN_SIZE_MM = TILE_FIELD_MM + 2 * (BOARD_TERRAIN_RIM_MM + BOARD_CLEARANCE_MM),
   TILE_FIELD_INSET_MM = BOARD_TERRAIN_RIM_MM + BOARD_CLEARANCE_MM;
@@ -169,6 +169,21 @@ function sampleTileTerrain(
   );
 }
 
+function sampleBoardRimTerrain(values: number[], eastMm: number, northMm: number) {
+  const innerRimEdge = BOARD_TERRAIN_RIM_MM,
+    oppositeInnerRimEdge = BOARD_TERRAIN_SIZE_MM - BOARD_TERRAIN_RIM_MM,
+    tileFieldEnd = TILE_FIELD_INSET_MM + TILE_FIELD_MM,
+    matchTileEdge = (coordinate: number) => {
+      // The board's inner terrain edge is 0.15 mm away from the tile field.
+      // Sample exactly at the neighboring tile edge there, so separate printed
+      // parts meet at the same height instead of showing a small step.
+      if (Math.abs(coordinate - innerRimEdge) < 1e-6) return TILE_FIELD_INSET_MM;
+      if (Math.abs(coordinate - oppositeInnerRimEdge) < 1e-6) return tileFieldEnd;
+      return coordinate;
+    };
+  return sampleBoardTerrain(values, matchTileEdge(eastMm), matchTileEdge(northMm));
+}
+
 function flattestCorner(values: number[]) {
   const perTile = GRID / COLS,
     corners = [0, COLS - 1, (ROWS - 1) * COLS, TILE_COUNT - 1];
@@ -255,7 +270,7 @@ function terrainTriangles(
       supportOverride ??
       (terrainOnly ? Math.max(bounds.minZ, 0) + 1.2 : bounds.maxZ - 0.25),
     floor = terrainOnly ? support - 1.2 : support - 0.18;
-  // The selected map covers the entire 110.2 mm board. Each tile samples only
+  // The selected map covers the entire 110.3 mm board. Each tile samples only
   // its 25 mm portion inside that board, leaving the surrounding data for the rim.
   const at = (x: number, y: number) =>
     sampleTileTerrain(values, row, col, x / perTile, y / perTile);
@@ -354,7 +369,7 @@ function terrainBoardTriangles(
     bottom
       ? floor
       : support +
-        sampleBoardTerrain(
+        sampleBoardRimTerrain(
           values,
           (x / GRID) * BOARD_TERRAIN_SIZE_MM,
           (y / GRID) * BOARD_TERRAIN_SIZE_MM,
@@ -549,7 +564,11 @@ function MapPicker({
     moved: boolean;
   } | null>(null);
   useEffect(() => {
-    if (!fullscreen) setView({ latitude, longitude });
+    if (fullscreen) return;
+    const frame = requestAnimationFrame(() =>
+      setView({ latitude, longitude }),
+    );
+    return () => cancelAnimationFrame(frame);
   }, [fullscreen, latitude, longitude]);
   const x = tileX(view.longitude, zoom),
     y = tileY(view.latitude, zoom),
@@ -903,7 +922,7 @@ function BoardRimPreview({ values }: { values: number[] }) {
             0,
             Math.min(
               1,
-              sampleBoardTerrain(
+              sampleBoardRimTerrain(
                 values,
                 (x / size) * BOARD_TERRAIN_SIZE_MM,
                 (1 - y / size) * BOARD_TERRAIN_SIZE_MM,
@@ -980,8 +999,8 @@ function TerrainViewer({
       // raw DEM sample as a sharp visual spike.
       smoothHeight = (gridX: number, gridY: number) => {
         let total = 0,
-          weight = 0,
-          centerX = Math.round(gridX),
+          weight = 0;
+        const centerX = Math.round(gridX),
           centerY = Math.round(GRID - gridY);
         for (let dy = -3; dy <= 3; dy += 1)
           for (let dx = -3; dx <= 3; dx += 1) {
@@ -1136,6 +1155,8 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+  // This remains available for loading an existing local GeoTIFF project.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function pickDem(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1417,7 +1438,7 @@ export default function Home() {
             <small>4 × 4 printable map</small>
           </div>
         </div>
-        <div className="headerNote">25 mm tiles · 110.2 mm terrain board</div>
+        <div className="headerNote">25 mm tiles · 110.3 mm terrain board</div>
       </header>
       <section className="workspace">
         <aside className="panel controls">
@@ -1619,9 +1640,9 @@ export default function Home() {
             </button>
           </div>
           <p className="printNote">
-            The board export has a fixed 5 mm terrain rim. Its 100.2 × 100.2 mm
-            opening leaves 0.1 mm clearance around the 100 × 100 mm tile
-            surface.
+            The board export has a fixed 5 mm terrain rim. Its 100.3 × 100.3 mm
+            opening leaves 0.15 mm clearance around the 100 × 100 mm tile
+            surface, while the terrain height matches exactly at every tile edge.
           </p>
         </aside>
       </section>
