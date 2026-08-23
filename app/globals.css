@@ -382,6 +382,8 @@ header {
   max-width: none;
   gap: 3px;
   z-index: 1;
+  /* Preview-only clearance so the real 0.1 mm fit is visible on screen. */
+  box-shadow: 0 0 0 3px #eff6f3;
 }
 .boardPreview .tile {
   border-radius: 3px;
