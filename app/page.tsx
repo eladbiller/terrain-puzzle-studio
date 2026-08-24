@@ -54,7 +54,7 @@ type SavedProject = {
 
 type ProjectFileHandle = {
   createWritable: () => Promise<{
-    write: (data: string) => Promise<void>;
+    write: (data: string | ArrayBuffer) => Promise<void>;
     close: () => Promise<void>;
   }>;
 };
@@ -1496,28 +1496,33 @@ export default function Home() {
       "This browser cannot choose a folder, so the project file was downloaded. It will still reopen automatically after refresh.",
     );
   }
-  async function chooseProjectFolderAndSave() {
+  async function chooseProjectFolder(): Promise<ProjectDirectoryHandle | null | undefined> {
     const pickerWindow = window as Window & {
       showDirectoryPicker?: (options?: { id?: string; mode?: "read" | "readwrite" }) => Promise<ProjectDirectoryHandle>;
     };
-    if (!pickerWindow.showDirectoryPicker) {
-      await downloadProjectFallback(projectSnapshot());
-      return;
-    }
+    if (!pickerWindow.showDirectoryPicker) return null;
     try {
-      const directory = await pickerWindow.showDirectoryPicker({
+      return await pickerWindow.showDirectoryPicker({
         id: "terrain-puzzle-projects",
         mode: "readwrite",
       });
-      await writeProjectToFolder(directory, projectSnapshot());
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof DOMException && error.name === "AbortError") return undefined;
+      return null;
+    }
+  }
+  async function chooseProjectFolderAndSave() {
+    const directory = await chooseProjectFolder();
+    if (directory === undefined) return;
+    if (!directory) {
       try {
         await downloadProjectFallback(projectSnapshot());
       } catch {
         setStatus("The project folder could not be used. Choose it again and allow read/write access.");
       }
+      return;
     }
+    await writeProjectToFolder(directory, projectSnapshot());
   }
   async function saveProject() {
     const project = projectSnapshot();
@@ -1529,6 +1534,47 @@ export default function Home() {
       await writeProjectToFolder(projectFolder, project);
     } catch {
       setStatus("The saved folder needs permission again. Choose the project folder, then save.");
+    }
+  }
+  async function folderForStlExport(): Promise<ProjectDirectoryHandle | null | undefined> {
+    if (projectFolder) return projectFolder;
+    const directory = await chooseProjectFolder();
+    if (!directory) return directory;
+    const project = projectSnapshot();
+    setProjectFolder(directory);
+    setProjectFolderName(directory.name);
+    try {
+      await rememberProject({
+        project,
+        directory,
+        fileName: projectFileName(project.puzzleName),
+      });
+    } catch {
+      // STL saving can still work if local browser memory is unavailable.
+    }
+    return directory;
+  }
+  async function saveStlFile(
+    fileName: string,
+    data: ArrayBuffer,
+    folder: ProjectDirectoryHandle | null,
+  ) {
+    if (!folder) {
+      download(fileName, data, "model/stl");
+      return false;
+    }
+    try {
+      const file = await folder.getFileHandle(fileName, { create: true }),
+        writable = await file.createWritable();
+      try {
+        await writable.write(data);
+      } finally {
+        await writable.close();
+      }
+      return true;
+    } catch {
+      download(fileName, data, "model/stl");
+      return false;
     }
   }
   async function loadProject(event: ChangeEvent<HTMLInputElement>) {
@@ -1551,7 +1597,10 @@ export default function Home() {
       event.target.value = "";
     }
   }
-  function exportTile(index: number) {
+  async function exportTileToFolder(
+    index: number,
+    folder: ProjectDirectoryHandle | null,
+  ) {
     const isPlaceholder = placeholderIndex === index && Boolean(placeholder),
       row = Math.floor(index / COLS),
       col = index % COLS,
@@ -1577,35 +1626,54 @@ export default function Home() {
             ? readTriangles(source.data)
             : [],
       combined = !source ? terrain : [...sourceTriangles, ...terrain];
-    download(
-      `${fileStem(puzzleName)}-tile-r${row + 1}-c${col + 1}${isPlaceholder ? "-placeholder" : ""}.stl`,
-      binaryStl(combined),
+    const fileName = `${fileStem(puzzleName)}-tile-r${row + 1}-c${col + 1}${isPlaceholder ? "-placeholder" : ""}.stl`,
+      savedToFolder = await saveStlFile(
+        fileName,
+        binaryStl(combined),
+        folder,
+      );
+    setStatus(
+      savedToFolder
+        ? `Tile ${row + 1}.${col + 1} saved to “${folder?.name}”.`
+        : `Tile ${row + 1}.${col + 1} downloaded.`,
     );
-    setStatus(`Tile ${row + 1}.${col + 1} downloaded.`);
   }
-  function exportBoard() {
+  async function exportTile(index: number) {
+    const folder = await folderForStlExport();
+    if (folder === undefined) return;
+    await exportTileToFolder(index, folder);
+  }
+  async function exportBoard() {
     if (!board) {
       setStatus("Load board.stl first to export the complete terrain board.");
       return;
     }
+    const folder = await folderForStlExport();
+    if (folder === undefined) return;
     const terrain = terrainBoardTriangles(
       elevation,
       board.bounds,
       effectiveRelief,
     );
-    download(
+    const savedToFolder = await saveStlFile(
       `${fileStem(puzzleName)}-board.stl`,
       binaryStl([...readTriangles(board.data), ...terrain]),
+      folder,
     );
     setStatus(
-      "Combined terrain board downloaded. It includes the board STL and the continuous terrain surface in one file.",
+      savedToFolder
+        ? `Combined terrain board saved to “${folder?.name}”.`
+        : "Combined terrain board downloaded. It includes the board STL and the continuous terrain surface in one file.",
     );
   }
-  function exportAll() {
-    for (let i = 0; i < TILE_COUNT; i += 1)
-      window.setTimeout(() => exportTile(i), i * 180);
+  async function exportAll() {
+    const folder = await folderForStlExport();
+    if (folder === undefined) return;
+    for (let i = 0; i < TILE_COUNT; i += 1) await exportTileToFolder(i, folder);
     setStatus(
-      "Preparing the 16 STL downloads. Your browser may ask to allow multiple files.",
+      folder
+        ? `All 16 STL files saved to “${folder.name}”.`
+        : "All 16 STL files were downloaded. Your browser may ask to allow multiple files.",
     );
   }
   return (
@@ -1808,15 +1876,15 @@ export default function Home() {
               : "Save once to choose a folder. Browsers without folder access download the file instead; your latest project still reopens after refresh."}
           </p>
           <div className="exports">
-            <button className="download" onClick={() => exportTile(selected)}>
+            <button className="download" onClick={() => void exportTile(selected)}>
               Download selected STL
             </button>
-            <button className="download all" onClick={exportAll}>
+            <button className="download all" onClick={() => void exportAll()}>
               Download all 16 STLs
             </button>
             <button
               className="download board"
-              onClick={exportBoard}
+              onClick={() => void exportBoard()}
               disabled={!board}
             >
               {board
