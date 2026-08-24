@@ -385,7 +385,9 @@ header {
   inset: 4.5351%; /* 5 mm ÷ 110.25 mm: the physical board rim only. */
   z-index: 1;
   display: block;
-  padding: max(0.625px, 0.125%); /* the separate 0.125 mm tile clearance */
+  /* Deliberately enlarged only in the preview, so the real 0.125 mm print
+     clearance stays easy to see without changing the exported geometry. */
+  padding: 2px;
   background: #eff6f3;
 }
 .boardPreview .tiles {

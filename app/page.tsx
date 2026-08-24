@@ -1793,9 +1793,6 @@ export default function Home() {
             <button type="button" onClick={() => void saveProject()}>
               Save project to folder
             </button>
-            <button type="button" onClick={() => void chooseProjectFolderAndSave()}>
-              Choose project folder
-            </button>
             <label className="projectLoad">
               <input
                 type="file"
