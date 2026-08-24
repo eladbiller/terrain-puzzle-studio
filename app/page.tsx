@@ -8,6 +8,7 @@ import {
   ChangeEvent,
   FormEvent,
   PointerEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -51,6 +52,28 @@ type SavedProject = {
   elevation: number[];
 };
 
+type ProjectFileHandle = {
+  createWritable: () => Promise<{
+    write: (data: string) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+};
+
+type ProjectDirectoryHandle = {
+  name: string;
+  getFileHandle: (name: string, options?: { create?: boolean }) => Promise<ProjectFileHandle>;
+};
+
+type StoredProject = {
+  project: SavedProject;
+  directory?: ProjectDirectoryHandle;
+  fileName?: string;
+};
+
+const PROJECT_DB_NAME = "terrain-puzzle-studio";
+const PROJECT_STORE_NAME = "saved-project";
+const PROJECT_STORE_KEY = "latest";
+
 function boundsOfStl(buffer: ArrayBuffer): Bounds {
   const view = new DataView(buffer),
     faces = view.getUint32(80, true);
@@ -89,6 +112,92 @@ async function loadBuiltInTemplate(path: string, name: string): Promise<Template
 
 function builtInAsset(name: string) {
   return `${APP_BASE_PATH}/${name}`;
+}
+
+function projectFileName(puzzleName: string) {
+  return `${fileStem(puzzleName)}.terrain-puzzle.json`;
+}
+
+function openProjectStore() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(PROJECT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(PROJECT_STORE_NAME))
+        request.result.createObjectStore(PROJECT_STORE_NAME);
+    };
+    request.onerror = () => reject(request.error ?? new Error("Project storage is unavailable."));
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+async function rememberProject(record: StoredProject) {
+  const database = await openProjectStore();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(PROJECT_STORE_NAME, "readwrite");
+      transaction.objectStore(PROJECT_STORE_NAME).put(record, PROJECT_STORE_KEY);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("Project could not be remembered."));
+      transaction.onabort = () => reject(transaction.error ?? new Error("Project storage was cancelled."));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function rememberedProject() {
+  const database = await openProjectStore();
+  try {
+    return await new Promise<StoredProject | null>((resolve, reject) => {
+      const request = database
+        .transaction(PROJECT_STORE_NAME, "readonly")
+        .objectStore(PROJECT_STORE_NAME)
+        .get(PROJECT_STORE_KEY);
+      request.onsuccess = () => resolve((request.result as StoredProject | undefined) ?? null);
+      request.onerror = () => reject(request.error ?? new Error("Saved project could not be read."));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function validSavedProject(input: unknown): SavedProject {
+  const saved = input as Partial<SavedProject>;
+  if (
+    saved.version !== 1 ||
+    !Array.isArray(saved.elevation) ||
+    saved.elevation.length !== (GRID + 1) ** 2 ||
+    !saved.elevation.every((value) => Number.isFinite(value))
+  )
+    throw new Error("This is not a valid Terrain Puzzle project file.");
+  const elevation = saved.elevation;
+  return {
+    version: 1,
+    puzzleName: typeof saved.puzzleName === "string" ? saved.puzzleName : "terrain-puzzle",
+    lat: typeof saved.lat === "string" ? saved.lat : "30.85274",
+    lon: typeof saved.lon === "string" ? saved.lon : "34.78200",
+    span: typeof saved.span === "string" ? saved.span : "10",
+    verticalModifier: typeof saved.verticalModifier === "string" ? saved.verticalModifier : "1",
+    elevationRangeM:
+      Number.isFinite(saved.elevationRangeM) && (saved.elevationRangeM as number) > 0
+        ? (saved.elevationRangeM as number)
+        : 100,
+    terrainSpanKm:
+      Number.isFinite(saved.terrainSpanKm) && (saved.terrainSpanKm as number) > 0
+        ? (saved.terrainSpanKm as number)
+        : Number(saved.span) || 10,
+    selected:
+      Number.isInteger(saved.selected) && (saved.selected as number) >= 0 && (saved.selected as number) < TILE_COUNT
+        ? (saved.selected as number)
+        : 12,
+    placeholderIndex:
+      Number.isInteger(saved.placeholderIndex) &&
+      (saved.placeholderIndex as number) >= 0 &&
+      (saved.placeholderIndex as number) < TILE_COUNT
+        ? (saved.placeholderIndex as number)
+        : flattestCorner(elevation),
+    elevation,
+  };
 }
 
 function demoElevation(resolution = GRID) {
@@ -1108,6 +1217,8 @@ export default function Home() {
     [span, setSpan] = useState("10"),
     [verticalModifier, setVerticalModifier] = useState("1"),
     [puzzleName, setPuzzleName] = useState("terrain-puzzle"),
+    [projectFolder, setProjectFolder] = useState<ProjectDirectoryHandle | null>(null),
+    [projectFolderName, setProjectFolderName] = useState(""),
     [viewerOpen, setViewerOpen] = useState(false),
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
@@ -1129,6 +1240,46 @@ export default function Home() {
       BOARD_TERRAIN_SIZE_MM,
     effectiveRelief =
       trueScaleRelief * Math.max(0.1, Number(verticalModifier) || 1);
+  const projectSnapshot = useCallback(
+      (): SavedProject => ({
+        version: 1,
+        puzzleName,
+        lat,
+        lon,
+        span,
+        verticalModifier,
+        elevationRangeM,
+        terrainSpanKm,
+        selected,
+        placeholderIndex,
+        elevation,
+      }),
+      [
+        elevation,
+        elevationRangeM,
+        lat,
+        lon,
+        placeholderIndex,
+        puzzleName,
+        selected,
+        span,
+        terrainSpanKm,
+        verticalModifier,
+      ],
+    ),
+    applySavedProject = useCallback((saved: SavedProject, message: string) => {
+      setPuzzleName(saved.puzzleName);
+      setLat(saved.lat);
+      setLon(saved.lon);
+      setSpan(saved.span);
+      setVerticalModifier(saved.verticalModifier);
+      setElevationRangeM(saved.elevationRangeM);
+      setTerrainSpanKm(saved.terrainSpanKm);
+      setSelected(saved.selected);
+      setPlaceholderIndex(saved.placeholderIndex);
+      setElevation(saved.elevation);
+      setStatus(message);
+    }, []);
   useEffect(() => {
     let cancelled = false;
     async function loadTemplates() {
@@ -1157,6 +1308,28 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    async function restoreProject() {
+      try {
+        const stored = await rememberedProject();
+        if (!stored) return;
+        const saved = validSavedProject(stored.project);
+        if (cancelled) return;
+        applySavedProject(saved, "Your last saved project was restored automatically.");
+        if (stored.directory) {
+          setProjectFolder(stored.directory);
+          setProjectFolderName(stored.directory.name);
+        }
+      } catch {
+        // A missing or older browser record should never prevent the builder loading.
+      }
+    }
+    void restoreProject();
+    return () => {
+      cancelled = true;
+    };
+  }, [applySavedProject]);
   // This remains available for loading an existing local GeoTIFF project.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function pickDem(event: ChangeEvent<HTMLInputElement>) {
@@ -1298,73 +1471,66 @@ export default function Home() {
       return String(next);
     });
   }
-  function saveProject() {
-    const project: SavedProject = {
-        version: 1,
-        puzzleName,
-        lat,
-        lon,
-        span,
-        verticalModifier,
-        elevationRangeM,
-        terrainSpanKm,
-        selected,
-        placeholderIndex,
-        elevation,
-      },
-      bytes = new TextEncoder().encode(JSON.stringify(project));
-    download(
-      `${fileStem(puzzleName)}.terrain-puzzle.json`,
-      bytes.buffer as ArrayBuffer,
-      "application/json",
-    );
-    setStatus("Project saved. Load this project file later to continue here.");
+  async function writeProjectToFolder(
+    directory: ProjectDirectoryHandle,
+    project: SavedProject,
+  ) {
+    const fileName = projectFileName(project.puzzleName),
+      file = await directory.getFileHandle(fileName, { create: true }),
+      writable = await file.createWritable();
+    try {
+      await writable.write(JSON.stringify(project, null, 2));
+    } finally {
+      await writable.close();
+    }
+    await rememberProject({ project, directory, fileName });
+    setProjectFolder(directory);
+    setProjectFolderName(directory.name);
+    setStatus(`Project saved to “${directory.name}”. It will reopen automatically after refresh.`);
+  }
+  async function chooseProjectFolderAndSave() {
+    const pickerWindow = window as Window & {
+      showDirectoryPicker?: (options?: { id?: string; mode?: "read" | "readwrite" }) => Promise<ProjectDirectoryHandle>;
+    };
+    if (!pickerWindow.showDirectoryPicker) {
+      setStatus("Folder saving needs Chrome or Edge. You can still load a project file below.");
+      return;
+    }
+    try {
+      const directory = await pickerWindow.showDirectoryPicker({
+        id: "terrain-puzzle-projects",
+        mode: "readwrite",
+      });
+      await writeProjectToFolder(directory, projectSnapshot());
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setStatus("The project folder could not be used. Choose it again and allow read/write access.");
+    }
+  }
+  async function saveProject() {
+    const project = projectSnapshot();
+    if (!projectFolder) {
+      await chooseProjectFolderAndSave();
+      return;
+    }
+    try {
+      await writeProjectToFolder(projectFolder, project);
+    } catch {
+      setStatus("The saved folder needs permission again. Choose the project folder, then save.");
+    }
   }
   async function loadProject(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const saved = JSON.parse(await file.text()) as Partial<SavedProject>;
-      if (
-        saved.version !== 1 ||
-        !Array.isArray(saved.elevation) ||
-        saved.elevation.length !== (GRID + 1) ** 2 ||
-        !saved.elevation.every((value) => Number.isFinite(value))
-      )
-        throw new Error("This is not a valid Terrain Puzzle project file.");
-      setPuzzleName(typeof saved.puzzleName === "string" ? saved.puzzleName : "terrain-puzzle");
-      setLat(typeof saved.lat === "string" ? saved.lat : "30.85274");
-      setLon(typeof saved.lon === "string" ? saved.lon : "34.78200");
-      setSpan(typeof saved.span === "string" ? saved.span : "2");
-      setVerticalModifier(
-        typeof saved.verticalModifier === "string" ? saved.verticalModifier : "1",
-      );
-      setElevationRangeM(
-        Number.isFinite(saved.elevationRangeM) && (saved.elevationRangeM as number) > 0
-          ? (saved.elevationRangeM as number)
-          : 100,
-      );
-      setTerrainSpanKm(
-        Number.isFinite(saved.terrainSpanKm) && (saved.terrainSpanKm as number) > 0
-          ? (saved.terrainSpanKm as number)
-          : Number(saved.span) || 10,
-      );
-      setSelected(
-        Number.isInteger(saved.selected) &&
-          (saved.selected as number) >= 0 &&
-          (saved.selected as number) < TILE_COUNT
-          ? (saved.selected as number)
-          : 12,
-      );
-      setPlaceholderIndex(
-        Number.isInteger(saved.placeholderIndex) &&
-          (saved.placeholderIndex as number) >= 0 &&
-          (saved.placeholderIndex as number) < TILE_COUNT
-          ? (saved.placeholderIndex as number)
-          : flattestCorner(saved.elevation),
-      );
-      setElevation(saved.elevation);
-      setStatus(`Project “${file.name}” loaded. You can continue working.`);
+      const saved = validSavedProject(JSON.parse(await file.text()));
+      await rememberProject({
+        project: saved,
+        ...(projectFolder
+          ? { directory: projectFolder, fileName: projectFileName(saved.puzzleName) }
+          : {}),
+      });
+      applySavedProject(saved, `Project “${file.name}” loaded and will reopen automatically after refresh.`);
     } catch (error) {
       setStatus(
         error instanceof Error ? error.message : "Project file could not be loaded.",
@@ -1612,8 +1778,11 @@ export default function Home() {
             Open 3D terrain viewer
           </button>
           <div className="projectActions" aria-label="Project files">
-            <button type="button" onClick={saveProject}>
-              Save project to computer
+            <button type="button" onClick={() => void saveProject()}>
+              Save project to folder
+            </button>
+            <button type="button" onClick={() => void chooseProjectFolderAndSave()}>
+              Choose project folder
             </button>
             <label className="projectLoad">
               <input
@@ -1624,6 +1793,11 @@ export default function Home() {
               Load saved project
             </label>
           </div>
+          <p className="projectMemory">
+            {projectFolderName
+              ? `Saving to “${projectFolderName}”. This project will reopen after refresh.`
+              : "Save once to choose a folder. Your latest saved project reopens after refresh."}
+          </p>
           <div className="exports">
             <button className="download" onClick={() => exportTile(selected)}>
               Download selected STL

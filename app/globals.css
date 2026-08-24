@@ -927,6 +927,12 @@ header {
 .projectLoad input {
   display: none;
 }
+.projectMemory {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
 .download:disabled {
   opacity: 0.48;
   cursor: not-allowed;
@@ -1085,6 +1091,7 @@ header {
   .mapPicker p,
   .projectActions button,
   .projectLoad,
+  .projectMemory,
   .areaAdjust button,
   .jumpArea,
   .jumpPad button,
@@ -1344,6 +1351,9 @@ header {
   .projectLoad {
     min-height: 30px;
     padding: 5px;
+  }
+  .projectMemory {
+    font-size: 10px;
   }
   .exports {
     gap: 5px;
