@@ -545,7 +545,10 @@ function download(name: string, data: ArrayBuffer, type = "model/stl") {
     anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = name;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
   anchor.click();
+  anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
@@ -1219,6 +1222,7 @@ export default function Home() {
     [puzzleName, setPuzzleName] = useState("terrain-puzzle"),
     [projectFolder, setProjectFolder] = useState<ProjectDirectoryHandle | null>(null),
     [projectFolderName, setProjectFolderName] = useState(""),
+    [readyDownload, setReadyDownload] = useState<{ name: string; url: string } | null>(null),
     [viewerOpen, setViewerOpen] = useState(false),
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
@@ -1537,7 +1541,6 @@ export default function Home() {
     }
   }
   async function folderForStlExport(): Promise<ProjectDirectoryHandle | null | undefined> {
-    if (projectFolder) return projectFolder;
     const directory = await chooseProjectFolder();
     if (!directory) return directory;
     const project = projectSnapshot();
@@ -1554,15 +1557,14 @@ export default function Home() {
     }
     return directory;
   }
+  function browserCanChooseFolder() {
+    return typeof (window as Window & { showDirectoryPicker?: unknown }).showDirectoryPicker === "function";
+  }
   async function saveStlFile(
     fileName: string,
     data: ArrayBuffer,
-    folder: ProjectDirectoryHandle | null,
+    folder: ProjectDirectoryHandle,
   ) {
-    if (!folder) {
-      download(fileName, data, "model/stl");
-      return false;
-    }
     try {
       const file = await folder.getFileHandle(fileName, { create: true }),
         writable = await file.createWritable();
@@ -1573,7 +1575,6 @@ export default function Home() {
       }
       return true;
     } catch {
-      download(fileName, data, "model/stl");
       return false;
     }
   }
@@ -1597,10 +1598,7 @@ export default function Home() {
       event.target.value = "";
     }
   }
-  async function exportTileToFolder(
-    index: number,
-    folder: ProjectDirectoryHandle | null,
-  ) {
+  function tileExport(index: number) {
     const isPlaceholder = placeholderIndex === index && Boolean(placeholder),
       row = Math.floor(index / COLS),
       col = index % COLS,
@@ -1626,49 +1624,126 @@ export default function Home() {
             ? readTriangles(source.data)
             : [],
       combined = !source ? terrain : [...sourceTriangles, ...terrain];
-    const fileName = `${fileStem(puzzleName)}-tile-r${row + 1}-c${col + 1}${isPlaceholder ? "-placeholder" : ""}.stl`,
-      savedToFolder = await saveStlFile(
-        fileName,
-        binaryStl(combined),
-        folder,
-      );
+    return {
+      row,
+      col,
+      fileName: `${fileStem(puzzleName)}-tile-r${row + 1}-c${col + 1}${isPlaceholder ? "-placeholder" : ""}.stl`,
+      data: binaryStl(combined),
+    };
+  }
+  function stageDownload(fileName: string, data: ArrayBuffer) {
+    if (readyDownload) URL.revokeObjectURL(readyDownload.url);
+    setReadyDownload({
+      name: fileName,
+      url: URL.createObjectURL(new Blob([data], { type: "model/stl" })),
+    });
+  }
+  function stageTileDownload(index: number) {
+    try {
+      const exported = tileExport(index);
+      stageDownload(exported.fileName, exported.data);
+      setStatus(`Tile ${exported.row + 1}.${exported.col + 1} is ready. Click “Save STL file” below to finish downloading it.`);
+    } catch {
+      const row = Math.floor(index / COLS),
+        col = index % COLS;
+      setStatus(`Tile ${row + 1}.${col + 1} could not be created. Try fetching the terrain again.`);
+    }
+  }
+  async function exportTileToFolder(index: number, folder: ProjectDirectoryHandle) {
+    const exported = tileExport(index),
+      savedToFolder = await saveStlFile(exported.fileName, exported.data, folder);
     setStatus(
       savedToFolder
-        ? `Tile ${row + 1}.${col + 1} saved to “${folder?.name}”.`
-        : `Tile ${row + 1}.${col + 1} downloaded.`,
+        ? `Tile ${exported.row + 1}.${exported.col + 1} saved to “${folder.name}”.`
+        : "That folder could not be used. Choose it again and try the export once more.",
     );
   }
-  async function exportTile(index: number) {
-    const folder = await folderForStlExport();
-    if (folder === undefined) return;
-    await exportTileToFolder(index, folder);
-  }
-  async function exportBoard() {
-    if (!board) {
-      setStatus("Load board.stl first to export the complete terrain board.");
+  function exportTile(index: number) {
+    if (!browserCanChooseFolder()) {
+      const row = Math.floor(index / COLS),
+        col = index % COLS;
+      setStatus(`Creating the high-resolution STL for tile ${row + 1}.${col + 1}…`);
+      window.setTimeout(() => stageTileDownload(index), 30);
       return;
     }
+    void exportTileToSelectedFolder(index);
+  }
+  async function exportTileToSelectedFolder(index: number) {
     const folder = await folderForStlExport();
     if (folder === undefined) return;
+    if (!folder) {
+      setStatus("The folder could not be opened. Try the export again and choose a folder.");
+      return;
+    }
+    await exportTileToFolder(index, folder);
+  }
+  function boardExport() {
+    if (!board) {
+      setStatus("Load board.stl first to export the complete terrain board.");
+      return null;
+    }
     const terrain = terrainBoardTriangles(
       elevation,
       board.bounds,
       effectiveRelief,
     );
-    const savedToFolder = await saveStlFile(
-      `${fileStem(puzzleName)}-board.stl`,
-      binaryStl([...readTriangles(board.data), ...terrain]),
-      folder,
-    );
-    setStatus(
-      savedToFolder
-        ? `Combined terrain board saved to “${folder?.name}”.`
-        : "Combined terrain board downloaded. It includes the board STL and the continuous terrain surface in one file.",
-    );
+    return {
+      fileName: `${fileStem(puzzleName)}-board.stl`,
+      data: binaryStl([...readTriangles(board.data), ...terrain]),
+    };
   }
-  async function exportAll() {
+  function exportBoard() {
+    if (!board) {
+      setStatus("Load board.stl first to export the complete terrain board.");
+      return;
+    }
+    if (!browserCanChooseFolder()) {
+      setStatus("Creating the high-resolution terrain board STL…");
+      window.setTimeout(() => {
+        const exported = boardExport();
+        if (!exported) return;
+        try {
+          stageDownload(exported.fileName, exported.data);
+          setStatus("The combined terrain board is ready. Click “Save STL file” below to finish downloading it.");
+        } catch {
+          setStatus("The terrain board could not be created. Try fetching the terrain again.");
+        }
+      }, 30);
+      return;
+    }
+    void exportBoardToSelectedFolder();
+  }
+  async function exportBoardToSelectedFolder() {
     const folder = await folderForStlExport();
     if (folder === undefined) return;
+    if (!folder) {
+      setStatus("The folder could not be opened. Try the export again and choose a folder.");
+      return;
+    }
+    const exported = boardExport();
+    if (!exported) return;
+    const savedToFolder = await saveStlFile(exported.fileName, exported.data, folder);
+    setStatus(
+      savedToFolder
+        ? `Combined terrain board saved to “${folder.name}”.`
+        : "That folder could not be used. Choose it again and try the export once more.",
+    );
+  }
+  function exportAll() {
+    if (!browserCanChooseFolder()) {
+      setStatus("This browser can save one STL at a time. Creating the selected tile now; use a browser with folder access for all 16 files at once.");
+      window.setTimeout(() => stageTileDownload(selected), 30);
+      return;
+    }
+    void exportAllToSelectedFolder();
+  }
+  async function exportAllToSelectedFolder() {
+    const folder = await folderForStlExport();
+    if (folder === undefined) return;
+    if (!folder) {
+      setStatus("The folder could not be opened. Try the export again and choose a folder.");
+      return;
+    }
     for (let i = 0; i < TILE_COUNT; i += 1) await exportTileToFolder(i, folder);
     setStatus(
       folder
@@ -1876,15 +1951,20 @@ export default function Home() {
               : "Save once to choose a folder. Browsers without folder access download the file instead; your latest project still reopens after refresh."}
           </p>
           <div className="exports">
-            <button className="download" onClick={() => void exportTile(selected)}>
+            <button
+              className="download"
+              type="button"
+              onClick={() => exportTile(selected)}
+            >
               Download selected STL
             </button>
-            <button className="download all" onClick={() => void exportAll()}>
+            <button className="download all" type="button" onClick={exportAll}>
               Download all 16 STLs
             </button>
             <button
               className="download board"
-              onClick={() => void exportBoard()}
+              type="button"
+              onClick={exportBoard}
               disabled={!board}
             >
               {board
@@ -1892,6 +1972,15 @@ export default function Home() {
                 : "Load board STL to export board terrain"}
             </button>
           </div>
+          {readyDownload && (
+            <a
+              className="download readyDownload"
+              href={readyDownload.url}
+              download={readyDownload.name}
+            >
+              Save STL file
+            </a>
+          )}
           <p className="printNote">
             The board export has a fixed 5 mm terrain rim. Its 100.25 × 100.25 mm
             opening leaves 0.125 mm clearance around the 100 × 100 mm tile

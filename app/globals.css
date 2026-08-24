@@ -577,6 +577,13 @@ header {
   background: #e9f0ec;
   color: var(--green);
 }
+.readyDownload {
+  display: block;
+  margin-top: 8px;
+  text-align: center;
+  text-decoration: none;
+  background: #d89227;
+}
 @media (max-width: 1080px) {
   .workspace {
     grid-template-columns: 270px 1fr;
