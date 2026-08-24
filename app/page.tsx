@@ -31,7 +31,7 @@ const COLS = 4,
   TILE_COUNT = COLS * ROWS,
   TILE_TOP_MM = 25,
   BOARD_TERRAIN_RIM_MM = 5,
-  BOARD_CLEARANCE_MM = 0.15,
+  BOARD_CLEARANCE_MM = 0.125,
   TILE_FIELD_MM = COLS * TILE_TOP_MM,
   BOARD_TERRAIN_SIZE_MM = TILE_FIELD_MM + 2 * (BOARD_TERRAIN_RIM_MM + BOARD_CLEARANCE_MM),
   TILE_FIELD_INSET_MM = BOARD_TERRAIN_RIM_MM + BOARD_CLEARANCE_MM;
@@ -174,7 +174,7 @@ function sampleBoardRimTerrain(values: number[], eastMm: number, northMm: number
     oppositeInnerRimEdge = BOARD_TERRAIN_SIZE_MM - BOARD_TERRAIN_RIM_MM,
     tileFieldEnd = TILE_FIELD_INSET_MM + TILE_FIELD_MM,
     matchTileEdge = (coordinate: number) => {
-      // The board's inner terrain edge is 0.15 mm away from the tile field.
+      // The board's inner terrain edge is 0.125 mm away from the tile field.
       // Sample exactly at the neighboring tile edge there, so separate printed
       // parts meet at the same height instead of showing a small step.
       if (Math.abs(coordinate - innerRimEdge) < 1e-6) return TILE_FIELD_INSET_MM;
@@ -270,7 +270,7 @@ function terrainTriangles(
       supportOverride ??
       (terrainOnly ? Math.max(bounds.minZ, 0) + 1.2 : bounds.maxZ - 0.25),
     floor = terrainOnly ? support - 1.2 : support - 0.18;
-  // The selected map covers the entire 110.3 mm board. Each tile samples only
+  // The selected map covers the entire 110.25 mm board. Each tile samples only
   // its 25 mm portion inside that board, leaving the surrounding data for the rim.
   const at = (x: number, y: number) =>
     sampleTileTerrain(values, row, col, x / perTile, y / perTile);
@@ -348,8 +348,11 @@ function terrainBoardTriangles(
 ) {
   const width = bounds.maxX - bounds.minX,
     depth = bounds.maxY - bounds.minY,
-    support = bounds.maxZ - 0.35,
-    floor = support - 0.25,
+    // Use the very same vertical construction as the tile terrain. The prior
+    // board formula began 0.32 mm lower, creating a physical step at the rim.
+    support = bounds.maxZ - 0.25,
+    floor = support - 0.18,
+    terrainBase = support + 0.22,
     rimX = BOARD_TERRAIN_RIM_MM / width,
     rimY = BOARD_TERRAIN_RIM_MM / depth;
   // Insert the physical inner rim edge into the mesh. A whole-grid-cell ring
@@ -368,7 +371,7 @@ function terrainBoardTriangles(
     // the map and canvas previews, keeping north/south identical everywhere.
     bottom
       ? floor
-      : support +
+      : terrainBase +
         sampleBoardRimTerrain(
           values,
           (x / GRID) * BOARD_TERRAIN_SIZE_MM,
@@ -1437,7 +1440,7 @@ export default function Home() {
             <small>4 × 4 printable map</small>
           </div>
         </div>
-        <div className="headerNote">25 mm tiles · 110.3 mm terrain board</div>
+        <div className="headerNote">25 mm tiles · 110.25 mm terrain board</div>
       </header>
       <section className="workspace">
         <aside className="panel controls">
@@ -1639,8 +1642,8 @@ export default function Home() {
             </button>
           </div>
           <p className="printNote">
-            The board export has a fixed 5 mm terrain rim. Its 100.3 × 100.3 mm
-            opening leaves 0.15 mm clearance around the 100 × 100 mm tile
+            The board export has a fixed 5 mm terrain rim. Its 100.25 × 100.25 mm
+            opening leaves 0.125 mm clearance around the 100 × 100 mm tile
             surface, while the terrain height matches exactly at every tile edge.
           </p>
         </aside>
