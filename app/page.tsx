@@ -1488,12 +1488,20 @@ export default function Home() {
     setProjectFolderName(directory.name);
     setStatus(`Project saved to “${directory.name}”. It will reopen automatically after refresh.`);
   }
+  async function downloadProjectFallback(project: SavedProject) {
+    await rememberProject({ project });
+    const bytes = new TextEncoder().encode(JSON.stringify(project, null, 2));
+    download(projectFileName(project.puzzleName), bytes.buffer as ArrayBuffer, "application/json");
+    setStatus(
+      "This browser cannot choose a folder, so the project file was downloaded. It will still reopen automatically after refresh.",
+    );
+  }
   async function chooseProjectFolderAndSave() {
     const pickerWindow = window as Window & {
       showDirectoryPicker?: (options?: { id?: string; mode?: "read" | "readwrite" }) => Promise<ProjectDirectoryHandle>;
     };
     if (!pickerWindow.showDirectoryPicker) {
-      setStatus("Folder saving needs Chrome or Edge. You can still load a project file below.");
+      await downloadProjectFallback(projectSnapshot());
       return;
     }
     try {
@@ -1504,7 +1512,11 @@ export default function Home() {
       await writeProjectToFolder(directory, projectSnapshot());
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      setStatus("The project folder could not be used. Choose it again and allow read/write access.");
+      try {
+        await downloadProjectFallback(projectSnapshot());
+      } catch {
+        setStatus("The project folder could not be used. Choose it again and allow read/write access.");
+      }
     }
   }
   async function saveProject() {
@@ -1796,7 +1808,7 @@ export default function Home() {
           <p className="projectMemory">
             {projectFolderName
               ? `Saving to “${projectFolderName}”. This project will reopen after refresh.`
-              : "Save once to choose a folder. Your latest saved project reopens after refresh."}
+              : "Save once to choose a folder. Browsers without folder access download the file instead; your latest project still reopens after refresh."}
           </p>
           <div className="exports">
             <button className="download" onClick={() => exportTile(selected)}>
