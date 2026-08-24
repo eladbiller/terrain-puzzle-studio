@@ -601,13 +601,19 @@ function terrainRegion(
   longitude: number,
   kilometres: number,
 ) {
-  const latScale = 111.32,
-    lonScale = 111.32 * Math.cos((latitude * Math.PI) / 180);
+  const earthRadiusKm = 6371.0088,
+    halfAngle = kilometres / (2 * earthRadiusKm),
+    latitudeRadians = (latitude * Math.PI) / 180,
+    latDelta = (halfAngle * 180) / Math.PI,
+    lonDelta =
+      (Math.asin(Math.min(1, Math.sin(halfAngle) / Math.max(0.001, Math.cos(latitudeRadians)))) *
+        180) /
+      Math.PI;
   return {
-    minLat: latitude - kilometres / (2 * latScale),
-    maxLat: latitude + kilometres / (2 * latScale),
-    minLon: longitude - kilometres / (2 * lonScale),
-    maxLon: longitude + kilometres / (2 * lonScale),
+    minLat: latitude - latDelta,
+    maxLat: latitude + latDelta,
+    minLon: longitude - lonDelta,
+    maxLon: longitude + lonDelta,
   };
 }
 
@@ -688,14 +694,7 @@ function MapPicker({
   const x = tileX(view.longitude, zoom),
     y = tileY(view.latitude, zoom),
     selectedX = tileX(longitude, zoom),
-    selectedY = tileY(latitude, zoom),
-    selectedRegion = terrainRegion(latitude, longitude, areaKm),
-    selectionWest = tileX(selectedRegion.minLon, zoom),
-    selectionEast = tileX(selectedRegion.maxLon, zoom),
-    selectionNorth = tileY(selectedRegion.maxLat, zoom),
-    selectionSouth = tileY(selectedRegion.minLat, zoom),
-    selectionWidth = (selectionEast - selectionWest) * 256,
-    selectionHeight = (selectionSouth - selectionNorth) * 256;
+    selectedY = tileY(latitude, zoom);
   const tiles = useMemo(
     () =>
       Array.from({ length: (fullscreen ? 9 : 5) ** 2 }, (_, i) => {
@@ -711,11 +710,14 @@ function MapPicker({
   );
   const selectedLeft = (selectedX - x) * 256,
     selectedTop = (selectedY - y) * 256,
-    selectionLeft = (selectionWest - x) * 256,
-    selectionTop = (selectionNorth - y) * 256,
     metresPerPixel =
       (40075016.686 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180))) /
       (256 * 2 ** zoom),
+    // Web Mercator is locally conformal, so using one metre-per-pixel value
+    // keeps the displayed selection a true ground-distance square.
+    selectionSize = (areaKm * 1000) / metresPerPixel,
+    selectionLeft = selectedLeft - selectionSize / 2,
+    selectionTop = selectedTop - selectionSize / 2,
     stepKm = Math.max(0.01, (metresPerPixel * 16) / 1000);
   function setZoomAround(delta: number) {
     setZoom((current) => Math.max(5, Math.min(16, current + delta)));
@@ -823,8 +825,8 @@ function MapPicker({
       <span
         className="areaBox"
         style={{
-          width: selectionWidth,
-          height: selectionHeight,
+          width: selectionSize,
+          height: selectionSize,
           left: `calc(50% + ${selectionLeft}px)`,
           top: `calc(50% + ${selectionTop}px)`,
         }}
@@ -1223,6 +1225,7 @@ export default function Home() {
     [projectFolder, setProjectFolder] = useState<ProjectDirectoryHandle | null>(null),
     [projectFolderName, setProjectFolderName] = useState(""),
     [readyDownload, setReadyDownload] = useState<{ name: string; url: string } | null>(null),
+    [readyProjectSave, setReadyProjectSave] = useState<{ name: string; url: string } | null>(null),
     [viewerOpen, setViewerOpen] = useState(false),
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
@@ -1494,10 +1497,15 @@ export default function Home() {
   }
   async function downloadProjectFallback(project: SavedProject) {
     await rememberProject({ project });
-    const bytes = new TextEncoder().encode(JSON.stringify(project, null, 2));
-    download(projectFileName(project.puzzleName), bytes.buffer as ArrayBuffer, "application/json");
+    if (readyProjectSave) URL.revokeObjectURL(readyProjectSave.url);
+    const bytes = new TextEncoder().encode(JSON.stringify(project, null, 2)),
+      fileName = projectFileName(project.puzzleName);
+    setReadyProjectSave({
+      name: fileName,
+      url: URL.createObjectURL(new Blob([bytes], { type: "application/json" })),
+    });
     setStatus(
-      "This browser cannot choose a folder, so the project file was downloaded. It will still reopen automatically after refresh.",
+      "Your project is ready. Click “Save project file” below to download it; it will also reopen automatically after refresh.",
     );
   }
   async function chooseProjectFolder(): Promise<ProjectDirectoryHandle | null | undefined> {
@@ -1529,16 +1537,7 @@ export default function Home() {
     await writeProjectToFolder(directory, projectSnapshot());
   }
   async function saveProject() {
-    const project = projectSnapshot();
-    if (!projectFolder) {
-      await chooseProjectFolderAndSave();
-      return;
-    }
-    try {
-      await writeProjectToFolder(projectFolder, project);
-    } catch {
-      setStatus("The saved folder needs permission again. Choose the project folder, then save.");
-    }
+    await chooseProjectFolderAndSave();
   }
   async function folderForStlExport(): Promise<ProjectDirectoryHandle | null | undefined> {
     const directory = await chooseProjectFolder();
@@ -1950,6 +1949,15 @@ export default function Home() {
               ? `Saving to “${projectFolderName}”. This project will reopen after refresh.`
               : "Save once to choose a folder. Browsers without folder access download the file instead; your latest project still reopens after refresh."}
           </p>
+          {readyProjectSave && (
+            <a
+              className="download readyDownload"
+              href={readyProjectSave.url}
+              download={readyProjectSave.name}
+            >
+              Save project file
+            </a>
+          )}
           <div className="exports">
             <button
               className="download"
