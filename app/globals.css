@@ -327,6 +327,29 @@ header {
   font-size: 12px;
   margin: 4px 0;
 }
+.joinedBoardPicker {
+  display: grid;
+  gap: 7px;
+  width: min(100%, 680px);
+  margin: -8px auto 14px;
+}
+.joinedBoardPicker button {
+  min-height: 31px;
+  border: 1px solid #9abdb5;
+  border-radius: 7px;
+  color: #155e59;
+  background: #eef6f2;
+  font-size: 11px;
+  font-weight: 700;
+}
+.joinedBoardPicker button.active {
+  border-color: var(--orange);
+  background: #fff3d7;
+  box-shadow: inset 0 0 0 1px var(--orange);
+}
+.joinedBoardPicker button:hover {
+  background: #dceee7;
+}
 .legend {
   color: var(--muted);
   font-size: 10px;

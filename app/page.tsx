@@ -50,7 +50,12 @@ type SavedProject = {
   terrainSpanKm: number;
   selected: number;
   placeholderIndex: number | null;
+  placeholderPuzzle?: number;
   elevation: number[];
+  puzzleRows?: number;
+  puzzleColumns?: number;
+  activePuzzle?: number;
+  joinedElevations?: number[][];
 };
 
 type ProjectFileHandle = {
@@ -164,11 +169,25 @@ async function rememberedProject() {
 
 function validSavedProject(input: unknown): SavedProject {
   const saved = input as Partial<SavedProject>;
+  const puzzleRows =
+      Number.isInteger(saved.puzzleRows) && (saved.puzzleRows as number) >= 1 && (saved.puzzleRows as number) <= 3
+        ? (saved.puzzleRows as number)
+        : 1,
+    puzzleColumns =
+      Number.isInteger(saved.puzzleColumns) && (saved.puzzleColumns as number) >= 1 && (saved.puzzleColumns as number) <= 3
+        ? (saved.puzzleColumns as number)
+        : 1,
+    puzzleCount = puzzleRows * puzzleColumns,
+    validBoard = (values: unknown): values is number[] =>
+      Array.isArray(values) &&
+      values.length === (GRID + 1) ** 2 &&
+      values.every((value) => Number.isFinite(value)),
+    savedBoards = Array.isArray(saved.joinedElevations) ? saved.joinedElevations : null;
   if (
     saved.version !== 1 ||
-    !Array.isArray(saved.elevation) ||
-    saved.elevation.length !== (GRID + 1) ** 2 ||
-    !saved.elevation.every((value) => Number.isFinite(value))
+    !validBoard(saved.elevation) ||
+    (savedBoards !== null &&
+      (savedBoards.length !== puzzleCount || !savedBoards.every(validBoard)))
   )
     throw new Error("This is not a valid Terrain Puzzle project file.");
   const elevation = saved.elevation;
@@ -199,7 +218,22 @@ function validSavedProject(input: unknown): SavedProject {
       (saved.placeholderIndex as number) < TILE_COUNT
         ? (saved.placeholderIndex as number)
         : flattestCorner(elevation),
+    placeholderPuzzle:
+      Number.isInteger(saved.placeholderPuzzle) &&
+      (saved.placeholderPuzzle as number) >= 0 &&
+      (saved.placeholderPuzzle as number) < puzzleCount
+        ? (saved.placeholderPuzzle as number)
+        : 0,
     elevation,
+    puzzleRows,
+    puzzleColumns,
+    activePuzzle:
+      Number.isInteger(saved.activePuzzle) &&
+      (saved.activePuzzle as number) >= 0 &&
+      (saved.activePuzzle as number) < puzzleCount
+        ? (saved.activePuzzle as number)
+        : 0,
+    joinedElevations: savedBoards ?? [elevation],
   };
 }
 
@@ -225,7 +259,7 @@ function demoElevation(resolution = GRID) {
 
 const DEFAULT_ELEVATION = demoElevation();
 
-function repairElevationOutliers(values: number[]) {
+function repairElevationOutliers(values: number[], columns = GRID, rows = GRID) {
   // Elevation tiles can occasionally contain a single bad pixel. It becomes a
   // tall needle in a printed STL, so replace only values that disagree sharply
   // with every nearby sample. Two passes also catch a pair of adjacent pixels.
@@ -233,18 +267,18 @@ function repairElevationOutliers(values: number[]) {
   for (let pass = 0; pass < 2; pass += 1) {
     const source = repaired;
     repaired = [...source];
-    for (let y = 1; y < GRID; y += 1)
-      for (let x = 1; x < GRID; x += 1) {
+    for (let y = 1; y < rows; y += 1)
+      for (let x = 1; x < columns; x += 1) {
         const nearby: number[] = [];
         for (let dy = -1; dy <= 1; dy += 1)
           for (let dx = -1; dx <= 1; dx += 1) {
-            if (dx || dy) nearby.push(source[(y + dy) * (GRID + 1) + x + dx]);
+            if (dx || dy) nearby.push(source[(y + dy) * (columns + 1) + x + dx]);
           }
         nearby.sort((a, b) => a - b);
         const middle = nearby[Math.floor(nearby.length / 2)],
           deviations = nearby.map((value) => Math.abs(value - middle)).sort((a, b) => a - b),
           medianDeviation = deviations[Math.floor(deviations.length / 2)],
-          index = y * (GRID + 1) + x,
+          index = y * (columns + 1) + x,
           limit = Math.max(20, medianDeviation * 10);
         if (Math.abs(source[index] - middle) > limit) repaired[index] = middle;
       }
@@ -543,18 +577,6 @@ function terrainBoardTriangles(
     }
   return tris;
 }
-function download(name: string, data: ArrayBuffer, type = "model/stl") {
-  const url = URL.createObjectURL(new Blob([data], { type })),
-    anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.style.display = "none";
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 function fileStem(name: string) {
   const cleaned = name
     .trim()
@@ -602,14 +624,16 @@ const latitudeAt = (y: number, zoom: number) =>
 function terrainRegion(
   latitude: number,
   longitude: number,
-  kilometres: number,
+  widthKm: number,
+  heightKm = widthKm,
 ) {
   const earthRadiusKm = 6371.0088,
-    halfAngle = kilometres / (2 * earthRadiusKm),
+    halfWidthAngle = widthKm / (2 * earthRadiusKm),
+    halfHeightAngle = heightKm / (2 * earthRadiusKm),
     latitudeRadians = (latitude * Math.PI) / 180,
-    latDelta = (halfAngle * 180) / Math.PI,
+    latDelta = (halfHeightAngle * 180) / Math.PI,
     lonDelta =
-      (Math.asin(Math.min(1, Math.sin(halfAngle) / Math.max(0.001, Math.cos(latitudeRadians)))) *
+      (Math.asin(Math.min(1, Math.sin(halfWidthAngle) / Math.max(0.001, Math.cos(latitudeRadians)))) *
         180) /
       Math.PI;
   return {
@@ -623,6 +647,8 @@ function terrainRegion(
 async function elevationFromGeoTiff(
   buffer: ArrayBuffer,
   region: ReturnType<typeof terrainRegion>,
+  columns = GRID,
+  rows = GRID,
 ) {
   const tiff = await fromArrayBuffer(buffer),
     image = await tiff.getImage(),
@@ -649,8 +675,8 @@ async function elevationFromGeoTiff(
     );
   const raster = await image.readRasters({
     bbox: [region.minLon, region.minLat, region.maxLon, region.maxLat],
-    width: GRID + 1,
-    height: GRID + 1,
+    width: columns + 1,
+    height: rows + 1,
     resampleMethod: "bilinear",
     interleave: true,
   });
@@ -665,14 +691,16 @@ function MapPicker({
   latitude,
   longitude,
   areaKm,
+  puzzleRows,
+  puzzleColumns,
   onPick,
-  onJump,
 }: {
   latitude: number;
   longitude: number;
   areaKm: number;
+  puzzleRows: number;
+  puzzleColumns: number;
   onPick: (latitude: number, longitude: number) => void;
-  onJump: () => void;
 }) {
   const [zoom, setZoom] = useState(11),
     [query, setQuery] = useState(""),
@@ -718,11 +746,12 @@ function MapPicker({
     metresPerPixel =
       (40075016.686 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180))) /
       (256 * 2 ** zoom),
-    // Web Mercator is locally conformal, so using one metre-per-pixel value
-    // keeps the displayed selection a true ground-distance square.
-    selectionSize = (areaKm * 1000) / metresPerPixel,
-    selectionLeft = selectedLeft - selectionSize / 2,
-    selectionTop = selectedTop - selectionSize / 2,
+    // Web Mercator is locally conformal. The selection shows the real full
+    // joined layout size, including every connected puzzle board.
+    selectionWidth = (areaKm * puzzleColumns * 1000) / metresPerPixel,
+    selectionHeight = (areaKm * puzzleRows * 1000) / metresPerPixel,
+    selectionLeft = selectedLeft - selectionWidth / 2,
+    selectionTop = selectedTop - selectionHeight / 2,
     stepKm = Math.max(0.01, (metresPerPixel * 16) / 1000);
   function setZoomAround(delta: number) {
     setZoom((current) => Math.max(5, Math.min(16, current + delta)));
@@ -769,18 +798,6 @@ function MapPicker({
             : 0),
       longitude +
         (direction === "east" ? lonStep : direction === "west" ? -lonStep : 0),
-    );
-  }
-  function jump(direction: "north" | "south" | "east" | "west") {
-    // Use the exact same geographic extent as the terrain fetch, so the old
-    // outer edge becomes the new inner edge with no map gap or overlap.
-    const region = terrainRegion(latitude, longitude, Math.max(0.1, areaKm)),
-      latDistance = (region.maxLat - latitude) * 2,
-      lonDistance = (region.maxLon - longitude) * 2;
-    onJump();
-    onPick(
-      latitude + (direction === "north" ? latDistance : direction === "south" ? -latDistance : 0),
-      longitude + (direction === "east" ? lonDistance : direction === "west" ? -lonDistance : 0),
     );
   }
   async function search(event: FormEvent) {
@@ -832,8 +849,8 @@ function MapPicker({
       <span
         className="areaBox"
         style={{
-          width: selectionSize,
-          height: selectionSize,
+          width: selectionWidth,
+          height: selectionHeight,
           left: `calc(50% + ${selectionLeft}px)`,
           top: `calc(50% + ${selectionTop}px)`,
         }}
@@ -937,15 +954,6 @@ function MapPicker({
           : `${stepKm.toFixed(1)} km`}
         . Use the full-screen map when you want to pan freely.
       </p>
-      <div className="jumpArea">
-        <b>Jump one full area width</b>
-        <div className="jumpPad" aria-label="Jump terrain square by one full area">
-          <button type="button" onClick={() => jump("north")}>Jump ↑</button>
-          <button type="button" onClick={() => jump("west")}>Jump ←</button>
-          <button type="button" onClick={() => jump("south")}>Jump ↓</button>
-          <button type="button" onClick={() => jump("east")}>Jump →</button>
-        </div>
-      </div>
       <button className="fullMapButton" type="button" onClick={() => setFullscreen(true)}>
         Open full-screen map
       </button>
@@ -1221,10 +1229,15 @@ export default function Home() {
     [elevationRangeM, setElevationRangeM] = useState(100),
     [elevationDatumM, setElevationDatumM] = useState<number | null>(null),
     [terrainSpanKm, setTerrainSpanKm] = useState(10),
+    [puzzleRows, setPuzzleRows] = useState(1),
+    [puzzleColumns, setPuzzleColumns] = useState(1),
+    [activePuzzle, setActivePuzzle] = useState(0),
+    [joinedElevations, setJoinedElevations] = useState<number[][]>([DEFAULT_ELEVATION]),
     [selected, setSelected] = useState(12),
     [placeholderIndex, setPlaceholderIndex] = useState(() =>
       flattestCorner(DEFAULT_ELEVATION),
     ),
+    [placeholderPuzzle, setPlaceholderPuzzle] = useState(0),
     [lat, setLat] = useState("30.85274"),
     [lon, setLon] = useState("34.78200"),
     [span, setSpan] = useState("10"),
@@ -1238,7 +1251,6 @@ export default function Home() {
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
     );
-  const preserveJumpReference = useRef(false);
   const tileBounds = tile?.bounds ?? {
       minX: -12.5,
       maxX: 12.5,
@@ -1250,7 +1262,10 @@ export default function Home() {
     },
     selectedRow = Math.floor(selected / COLS) + 1,
     selectedCol = (selected % COLS) + 1,
-    selectedPlaceholder = placeholderIndex === selected,
+    selectedPlaceholder = placeholderPuzzle === activePuzzle && placeholderIndex === selected,
+    activePuzzleRow = Math.floor(activePuzzle / puzzleColumns) + 1,
+    activePuzzleColumn = (activePuzzle % puzzleColumns) + 1,
+    joinedPuzzleCount = puzzleRows * puzzleColumns,
     trueScaleRelief =
       (elevationRangeM / Math.max(0.1, terrainSpanKm * 1000)) *
       BOARD_TERRAIN_SIZE_MM,
@@ -1269,7 +1284,12 @@ export default function Home() {
         terrainSpanKm,
         selected,
         placeholderIndex,
+        placeholderPuzzle,
         elevation,
+        puzzleRows,
+        puzzleColumns,
+        activePuzzle,
+        joinedElevations,
       }),
       [
         elevation,
@@ -1278,11 +1298,16 @@ export default function Home() {
         lat,
         lon,
         placeholderIndex,
+        placeholderPuzzle,
         puzzleName,
         selected,
+        activePuzzle,
         span,
         terrainSpanKm,
         verticalModifier,
+        puzzleColumns,
+        puzzleRows,
+        joinedElevations,
       ],
     ),
     applySavedProject = useCallback((saved: SavedProject, message: string) => {
@@ -1294,9 +1319,14 @@ export default function Home() {
       setElevationRangeM(saved.elevationRangeM);
       setElevationDatumM(saved.elevationDatumM);
       setTerrainSpanKm(saved.terrainSpanKm);
+      setPuzzleRows(saved.puzzleRows ?? 1);
+      setPuzzleColumns(saved.puzzleColumns ?? 1);
+      setActivePuzzle(saved.activePuzzle ?? 0);
       setSelected(saved.selected);
       setPlaceholderIndex(saved.placeholderIndex);
+      setPlaceholderPuzzle(saved.placeholderPuzzle ?? 0);
       setElevation(saved.elevation);
+      setJoinedElevations(saved.joinedElevations ?? [saved.elevation]);
       setStatus(message);
     }, []);
   useEffect(() => {
@@ -1364,7 +1394,9 @@ export default function Home() {
   async function fetchElevation() {
     const latitude = Number(lat),
       longitude = Number(lon),
-      kilometres = Math.max(0.1, Number(span));
+      kilometres = Math.max(0.1, Number(span)),
+      sampleColumns = GRID * puzzleColumns,
+      sampleRows = GRID * puzzleRows;
     if (![latitude, longitude, kilometres].every(Number.isFinite)) {
       setStatus("Enter a valid latitude, longitude, and area width.");
       return;
@@ -1375,10 +1407,15 @@ export default function Home() {
         : "Loading terrain and slicing the model…",
     );
     try {
-      const region = terrainRegion(latitude, longitude, kilometres),
+      const region = terrainRegion(
+          latitude,
+          longitude,
+          kilometres * puzzleColumns,
+          kilometres * puzzleRows,
+        ),
         { minLat, maxLat, minLon, maxLon } = region;
       let samples: number[];
-      if (dem) samples = await elevationFromGeoTiff(dem.data, region);
+      if (dem) samples = await elevationFromGeoTiff(dem.data, region, sampleColumns, sampleRows);
       else {
         let zoom =
           kilometres <= 2
@@ -1434,10 +1471,10 @@ export default function Home() {
           );
         };
         samples = [];
-        for (let row = 0; row <= GRID; row += 1)
-          for (let col = 0; col <= GRID; col += 1) {
-            const sampleLat = maxLat - ((maxLat - minLat) * row) / GRID,
-              sampleLon = minLon + ((maxLon - minLon) * col) / GRID;
+        for (let row = 0; row <= sampleRows; row += 1)
+          for (let col = 0; col <= sampleColumns; col += 1) {
+            const sampleLat = maxLat - ((maxLat - minLat) * row) / sampleRows,
+              sampleLon = minLon + ((maxLon - minLon) * col) / sampleColumns;
             const pixelX = tileX(sampleLon, zoom) * 256,
               pixelY = tileY(sampleLat, zoom) * 256,
               x0 = Math.floor(pixelX),
@@ -1453,27 +1490,37 @@ export default function Home() {
             samples.push(top * (1 - fy) + bottom * fy);
           }
       }
-      samples = repairElevationOutliers(samples);
+      samples = repairElevationOutliers(samples, sampleColumns, sampleRows);
       const low = Math.min(...samples),
         high = Math.max(...samples),
         range = Math.max(1, high - low),
-        keepReference = preserveJumpReference.current && elevationDatumM !== null,
-        referenceDatum = keepReference && elevationDatumM !== null ? elevationDatumM : low,
-        referenceRange = keepReference ? elevationRangeM : range,
-        normalized = samples.map((value) => (value - referenceDatum) / referenceRange);
-      setElevation(normalized);
-      setElevationRangeM(referenceRange);
-      setElevationDatumM(referenceDatum);
+        normalized = samples.map((value) => (value - low) / range),
+        boards = Array.from({ length: puzzleRows * puzzleColumns }, (_, boardIndex) => {
+          const boardRow = Math.floor(boardIndex / puzzleColumns),
+            boardColumn = boardIndex % puzzleColumns,
+            result: number[] = [];
+          for (let row = 0; row <= GRID; row += 1)
+            for (let col = 0; col <= GRID; col += 1)
+              result.push(
+                normalized[
+                  (boardRow * GRID + row) * (sampleColumns + 1) +
+                    boardColumn * GRID +
+                    col
+                ],
+              );
+          return result;
+        });
+      setJoinedElevations(boards);
+      setActivePuzzle(0);
+      setElevation(boards[0]);
+      setElevationRangeM(range);
+      setElevationDatumM(low);
       setTerrainSpanKm(kilometres);
-      setPlaceholderIndex(flattestCorner(normalized));
+      setPlaceholderIndex(flattestCorner(boards[0]));
       setStatus(
-        keepReference
-          ? `Terrain loaded: ${Math.round(low)}–${Math.round(high)} m. The shared height reference was kept so this puzzle connects to the previous jump.`
-          : `Terrain loaded: ${Math.round(low)}–${Math.round(high)} m. The placeholder was set to the flattest corner.`,
+        `Continuous terrain loaded: ${Math.round(low)}–${Math.round(high)} m across ${puzzleRows} × ${puzzleColumns} joined puzzle${puzzleRows * puzzleColumns > 1 ? "s" : ""}. Shared edges use the same elevation samples.`,
       );
-      preserveJumpReference.current = false;
     } catch (error) {
-      preserveJumpReference.current = false;
       setStatus(
         error instanceof Error ? error.message : "Terrain could not be loaded.",
       );
@@ -1485,9 +1532,18 @@ export default function Home() {
       return;
     }
     setPlaceholderIndex(selected);
+    setPlaceholderPuzzle(activePuzzle);
     setStatus(
-      `Placeholder moved to tile ${selectedRow}.${selectedCol}. Its צ stays 1 mm above this tile's highest terrain.`,
+      `Placeholder moved to puzzle ${activePuzzleRow}.${activePuzzleColumn}, tile ${selectedRow}.${selectedCol}. Its צ stays 1 mm above this tile's highest terrain.`,
     );
+  }
+  function choosePuzzle(index: number) {
+    const nextElevation = joinedElevations[index];
+    if (!nextElevation) return;
+    setActivePuzzle(index);
+    setElevation(nextElevation);
+    setSelected(12);
+    setStatus(`Editing joined puzzle ${Math.floor(index / puzzleColumns) + 1}.${(index % puzzleColumns) + 1}.`);
   }
   function adjustArea(delta: number) {
     setSpan((current) => {
@@ -1497,6 +1553,17 @@ export default function Home() {
       );
       return String(next);
     });
+  }
+  function changeJoinedLayout(rows: number, columns: number) {
+    const boardCount = rows * columns;
+    setPuzzleRows(rows);
+    setPuzzleColumns(columns);
+    setActivePuzzle(0);
+    setJoinedElevations(Array.from({ length: boardCount }, () => DEFAULT_ELEVATION));
+    setElevation(DEFAULT_ELEVATION);
+    setPlaceholderPuzzle(0);
+    setPlaceholderIndex(flattestCorner(DEFAULT_ELEVATION));
+    setStatus(`Joined layout set to ${rows} × ${columns}. Fetch terrain to make one continuous map across all ${boardCount} board${boardCount > 1 ? "s" : ""}.`);
   }
   async function writeProjectToFolder(
     directory: ProjectDirectoryHandle,
@@ -1617,15 +1684,21 @@ export default function Home() {
       event.target.value = "";
     }
   }
-  function tileExport(index: number) {
-    const isPlaceholder = placeholderIndex === index && Boolean(placeholder),
+  function tileExport(
+    index: number,
+    boardIndex = activePuzzle,
+    boardElevation = elevation,
+  ) {
+    const boardRow = Math.floor(boardIndex / puzzleColumns) + 1,
+      boardColumn = (boardIndex % puzzleColumns) + 1,
+      isPlaceholder = placeholderPuzzle === boardIndex && placeholderIndex === index && Boolean(placeholder),
       row = Math.floor(index / COLS),
       col = index % COLS,
       source = isPlaceholder ? placeholder : tile,
       sourceBounds = isPlaceholder && placeholder ? placeholder.bounds : tileBounds,
       support = isPlaceholder ? 0 : undefined,
       terrain = terrainTriangles(
-        elevation,
+        boardElevation,
         row,
         col,
         sourceBounds,
@@ -1637,7 +1710,7 @@ export default function Home() {
         isPlaceholder && placeholder
           ? trimPlaceholderLetter(
               placeholder,
-              terrainPeak(elevation, row, col, effectiveRelief, 0),
+              terrainPeak(boardElevation, row, col, effectiveRelief, 0),
             )
           : source
             ? readTriangles(source.data)
@@ -1646,7 +1719,7 @@ export default function Home() {
     return {
       row,
       col,
-      fileName: `${fileStem(puzzleName)}-tile-r${row + 1}-c${col + 1}${isPlaceholder ? "-placeholder" : ""}.stl`,
+      fileName: `${fileStem(puzzleName)}-puzzle-r${boardRow}-c${boardColumn}-tile-r${row + 1}-c${col + 1}${isPlaceholder ? "-placeholder" : ""}.stl`,
       data: binaryStl(combined),
     };
   }
@@ -1668,8 +1741,8 @@ export default function Home() {
       setStatus(`Tile ${row + 1}.${col + 1} could not be created. Try fetching the terrain again.`);
     }
   }
-  async function exportTileToFolder(index: number, folder: ProjectDirectoryHandle) {
-    const exported = tileExport(index),
+  async function exportTileToFolder(index: number, folder: ProjectDirectoryHandle, boardIndex = activePuzzle) {
+    const exported = tileExport(index, boardIndex, joinedElevations[boardIndex] ?? elevation),
       savedToFolder = await saveStlFile(exported.fileName, exported.data, folder);
     setStatus(
       savedToFolder
@@ -1696,18 +1769,18 @@ export default function Home() {
     }
     await exportTileToFolder(index, folder);
   }
-  function boardExport() {
+  function boardExport(boardIndex = activePuzzle, boardElevation = elevation) {
     if (!board) {
       setStatus("Load board.stl first to export the complete terrain board.");
       return null;
     }
     const terrain = terrainBoardTriangles(
-      elevation,
+      boardElevation,
       board.bounds,
       effectiveRelief,
     );
     return {
-      fileName: `${fileStem(puzzleName)}-board.stl`,
+      fileName: `${fileStem(puzzleName)}-puzzle-r${Math.floor(boardIndex / puzzleColumns) + 1}-c${(boardIndex % puzzleColumns) + 1}-board.stl`,
       data: binaryStl([...readTriangles(board.data), ...terrain]),
     };
   }
@@ -1770,6 +1843,25 @@ export default function Home() {
         : "All 16 STL files were downloaded. Your browser may ask to allow multiple files.",
     );
   }
+  function exportAllJoined() {
+    if (!browserCanChooseFolder()) {
+      setStatus("This browser can save one STL at a time. Use a browser with folder access to save every joined puzzle board at once.");
+      return;
+    }
+    void exportAllJoinedToSelectedFolder();
+  }
+  async function exportAllJoinedToSelectedFolder() {
+    const folder = await folderForStlExport();
+    if (folder === undefined) return;
+    if (!folder) {
+      setStatus("The folder could not be opened. Try the export again and choose a folder.");
+      return;
+    }
+    for (let boardIndex = 0; boardIndex < joinedPuzzleCount; boardIndex += 1)
+      for (let tileIndex = 0; tileIndex < TILE_COUNT; tileIndex += 1)
+        await exportTileToFolder(tileIndex, folder, boardIndex);
+    setStatus(`All ${joinedPuzzleCount * TILE_COUNT} joined-puzzle tile STLs saved to “${folder.name}”.`);
+  }
   return (
     <main data-pages-build="20260823">
       <header>
@@ -1796,15 +1888,14 @@ export default function Home() {
               latitude={Number(lat) || 30.85274}
               longitude={Number(lon) || 34.78200}
               areaKm={Math.max(0.1, Number(span) || 10)}
+              puzzleRows={puzzleRows}
+              puzzleColumns={puzzleColumns}
               onPick={(nextLat, nextLon) => {
                 setLat(nextLat.toFixed(5));
                 setLon(nextLon.toFixed(5));
                 setStatus(
                   `Terrain square moved to ${nextLat.toFixed(5)}, ${nextLon.toFixed(5)}.`,
                 );
-              }}
-              onJump={() => {
-                preserveJumpReference.current = elevationDatumM !== null;
               }}
             />
           </div>
@@ -1852,6 +1943,24 @@ export default function Home() {
             </button>
           </div>
           <label>
+            Joined puzzle layout <output>{puzzleRows} × {puzzleColumns}</output>
+            <select
+              value={`${puzzleRows}x${puzzleColumns}`}
+              onChange={(event) => {
+                const [rows, columns] = event.target.value.split("x").map(Number);
+                changeJoinedLayout(rows, columns);
+              }}
+            >
+              <option value="1x1">1 × 1 — one puzzle</option>
+              <option value="1x2">1 × 2 — side by side</option>
+              <option value="2x1">2 × 1 — stacked</option>
+              <option value="2x2">2 × 2 — four joined puzzles</option>
+              <option value="1x3">1 × 3 — three across</option>
+              <option value="3x1">3 × 1 — three tall</option>
+              <option value="3x3">3 × 3 — nine joined puzzles</option>
+            </select>
+          </label>
+          <label>
             Puzzle name
             <input
               value={puzzleName}
@@ -1871,13 +1980,32 @@ export default function Home() {
           <div className="reviewHead">
             <div>
               <p className="eyebrow">TILE LAYOUT</p>
-              <h2>Choose the marker tile</h2>
-              <p>Click a tile to move the fixed placeholder.</p>
+              <h2>Choose the marker tile · board {activePuzzleRow}.{activePuzzleColumn}</h2>
+              <p>Choose a joined board, then click a tile to move the one fixed placeholder.</p>
             </div>
             <div className="legend">
               <i></i> puzzle tile <b>צ</b> placeholder
             </div>
           </div>
+          {joinedPuzzleCount > 1 && (
+            <div
+              className="joinedBoardPicker"
+              style={{ gridTemplateColumns: `repeat(${puzzleColumns}, minmax(0, 1fr))` }}
+              aria-label="Choose joined puzzle board"
+            >
+              {Array.from({ length: joinedPuzzleCount }, (_, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  className={index === activePuzzle ? "active" : ""}
+                  onClick={() => choosePuzzle(index)}
+                >
+                  Board {Math.floor(index / puzzleColumns) + 1}.{(index % puzzleColumns) + 1}
+                  {placeholderPuzzle === index ? " · צ" : ""}
+                </button>
+              ))}
+            </div>
+          )}
           <div
             className="boardPreview"
             aria-label="Assembled board preview with 5 millimetre terrain rim"
@@ -1890,7 +2018,7 @@ export default function Home() {
                     key={i}
                     index={i}
                     selected={i === selected}
-                    placeholder={placeholderIndex === i}
+                    placeholder={placeholderPuzzle === activePuzzle && placeholderIndex === i}
                     values={elevation}
                     onClick={() => setSelected(i)}
                   />
@@ -1906,7 +2034,7 @@ export default function Home() {
         <aside className="panel inspector">
           <p className="eyebrow">SELECTED TILE & EXPORT</p>
           <h2>
-            Tile {selectedRow}.{selectedCol}
+            Board {activePuzzleRow}.{activePuzzleColumn} · tile {selectedRow}.{selectedCol}
           </h2>
           <div className="tileDiagram">
             <div className="terrainShape"></div>
@@ -1949,7 +2077,7 @@ export default function Home() {
           <p className="printNote">
             ×1 is true vertical-to-horizontal scale: {trueScaleRelief.toFixed(2)}
             mm from the {Math.round(elevationRangeM)} m terrain range across a
-            {terrainSpanKm} km map. Current output: {effectiveRelief.toFixed(2)} mm.
+            {terrainSpanKm * puzzleColumns} × {terrainSpanKm * puzzleRows} km joined map. Current output: {effectiveRelief.toFixed(2)} mm.
           </p>
           <button className="viewerButton" type="button" onClick={() => setViewerOpen(true)}>
             Open 3D terrain viewer
@@ -1990,8 +2118,13 @@ export default function Home() {
               Download selected STL
             </button>
             <button className="download all" type="button" onClick={exportAll}>
-              Download all 16 STLs
+              Download all 16 STLs for this board
             </button>
+            {joinedPuzzleCount > 1 && (
+              <button className="download all" type="button" onClick={exportAllJoined}>
+                Download all {joinedPuzzleCount * TILE_COUNT} joined-puzzle STLs
+              </button>
+            )}
             <button
               className="download board"
               type="button"
