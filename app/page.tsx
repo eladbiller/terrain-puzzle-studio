@@ -46,6 +46,7 @@ type SavedProject = {
   span: string;
   verticalModifier: string;
   elevationRangeM: number;
+  elevationDatumM: number | null;
   terrainSpanKm: number;
   selected: number;
   placeholderIndex: number | null;
@@ -182,6 +183,8 @@ function validSavedProject(input: unknown): SavedProject {
       Number.isFinite(saved.elevationRangeM) && (saved.elevationRangeM as number) > 0
         ? (saved.elevationRangeM as number)
         : 100,
+    elevationDatumM:
+      Number.isFinite(saved.elevationDatumM) ? (saved.elevationDatumM as number) : null,
     terrainSpanKm:
       Number.isFinite(saved.terrainSpanKm) && (saved.terrainSpanKm as number) > 0
         ? (saved.terrainSpanKm as number)
@@ -663,11 +666,13 @@ function MapPicker({
   longitude,
   areaKm,
   onPick,
+  onJump,
 }: {
   latitude: number;
   longitude: number;
   areaKm: number;
   onPick: (latitude: number, longitude: number) => void;
+  onJump: () => void;
 }) {
   const [zoom, setZoom] = useState(11),
     [query, setQuery] = useState(""),
@@ -767,10 +772,12 @@ function MapPicker({
     );
   }
   function jump(direction: "north" | "south" | "east" | "west") {
-    const distanceKm = Math.max(0.1, areaKm),
-      latDistance = distanceKm / 111.32,
-      lonDistance =
-        distanceKm / (111.32 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180)));
+    // Use the exact same geographic extent as the terrain fetch, so the old
+    // outer edge becomes the new inner edge with no map gap or overlap.
+    const region = terrainRegion(latitude, longitude, Math.max(0.1, areaKm)),
+      latDistance = (region.maxLat - latitude) * 2,
+      lonDistance = (region.maxLon - longitude) * 2;
+    onJump();
     onPick(
       latitude + (direction === "north" ? latDistance : direction === "south" ? -latDistance : 0),
       longitude + (direction === "east" ? lonDistance : direction === "west" ? -lonDistance : 0),
@@ -1212,6 +1219,7 @@ export default function Home() {
     [dem, setDem] = useState<{ name: string; data: ArrayBuffer } | null>(null),
     [elevation, setElevation] = useState(DEFAULT_ELEVATION),
     [elevationRangeM, setElevationRangeM] = useState(100),
+    [elevationDatumM, setElevationDatumM] = useState<number | null>(null),
     [terrainSpanKm, setTerrainSpanKm] = useState(10),
     [selected, setSelected] = useState(12),
     [placeholderIndex, setPlaceholderIndex] = useState(() =>
@@ -1230,6 +1238,7 @@ export default function Home() {
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
     );
+  const preserveJumpReference = useRef(false);
   const tileBounds = tile?.bounds ?? {
       minX: -12.5,
       maxX: 12.5,
@@ -1256,6 +1265,7 @@ export default function Home() {
         span,
         verticalModifier,
         elevationRangeM,
+        elevationDatumM,
         terrainSpanKm,
         selected,
         placeholderIndex,
@@ -1264,6 +1274,7 @@ export default function Home() {
       [
         elevation,
         elevationRangeM,
+        elevationDatumM,
         lat,
         lon,
         placeholderIndex,
@@ -1281,6 +1292,7 @@ export default function Home() {
       setSpan(saved.span);
       setVerticalModifier(saved.verticalModifier);
       setElevationRangeM(saved.elevationRangeM);
+      setElevationDatumM(saved.elevationDatumM);
       setTerrainSpanKm(saved.terrainSpanKm);
       setSelected(saved.selected);
       setPlaceholderIndex(saved.placeholderIndex);
@@ -1445,15 +1457,23 @@ export default function Home() {
       const low = Math.min(...samples),
         high = Math.max(...samples),
         range = Math.max(1, high - low),
-        normalized = samples.map((value) => (value - low) / range);
+        keepReference = preserveJumpReference.current && elevationDatumM !== null,
+        referenceDatum = keepReference && elevationDatumM !== null ? elevationDatumM : low,
+        referenceRange = keepReference ? elevationRangeM : range,
+        normalized = samples.map((value) => (value - referenceDatum) / referenceRange);
       setElevation(normalized);
-      setElevationRangeM(range);
+      setElevationRangeM(referenceRange);
+      setElevationDatumM(referenceDatum);
       setTerrainSpanKm(kilometres);
       setPlaceholderIndex(flattestCorner(normalized));
       setStatus(
-        `Terrain loaded: ${Math.round(low)}–${Math.round(high)} m. The placeholder was set to the flattest corner.`,
+        keepReference
+          ? `Terrain loaded: ${Math.round(low)}–${Math.round(high)} m. The shared height reference was kept so this puzzle connects to the previous jump.`
+          : `Terrain loaded: ${Math.round(low)}–${Math.round(high)} m. The placeholder was set to the flattest corner.`,
       );
+      preserveJumpReference.current = false;
     } catch (error) {
+      preserveJumpReference.current = false;
       setStatus(
         error instanceof Error ? error.message : "Terrain could not be loaded.",
       );
@@ -1782,6 +1802,9 @@ export default function Home() {
                 setStatus(
                   `Terrain square moved to ${nextLat.toFixed(5)}, ${nextLon.toFixed(5)}.`,
                 );
+              }}
+              onJump={() => {
+                preserveJumpReference.current = elevationDatumM !== null;
               }}
             />
           </div>
