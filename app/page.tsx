@@ -50,7 +50,7 @@ type SavedProject = {
   terrainSpanKm: number;
   selected: number;
   placeholderIndex: number | null;
-  placeholderPuzzle?: number;
+  placeholderIndices?: number[];
   elevation: number[];
   puzzleRows?: number;
   puzzleColumns?: number;
@@ -182,7 +182,21 @@ function validSavedProject(input: unknown): SavedProject {
       Array.isArray(values) &&
       values.length === (GRID + 1) ** 2 &&
       values.every((value) => Number.isFinite(value)),
-    savedBoards = Array.isArray(saved.joinedElevations) ? saved.joinedElevations : null;
+    savedBoards = Array.isArray(saved.joinedElevations) ? saved.joinedElevations : null,
+    legacyPlaceholder =
+      Number.isInteger(saved.placeholderIndex) &&
+      (saved.placeholderIndex as number) >= 0 &&
+      (saved.placeholderIndex as number) < TILE_COUNT
+        ? (saved.placeholderIndex as number)
+        : 12,
+    placeholderIndices =
+      Array.isArray(saved.placeholderIndices) &&
+      saved.placeholderIndices.length === puzzleCount &&
+      saved.placeholderIndices.every(
+        (index) => Number.isInteger(index) && index >= 0 && index < TILE_COUNT,
+      )
+        ? saved.placeholderIndices
+        : Array.from({ length: puzzleCount }, () => legacyPlaceholder);
   if (
     saved.version !== 1 ||
     !validBoard(saved.elevation) ||
@@ -213,17 +227,8 @@ function validSavedProject(input: unknown): SavedProject {
         ? (saved.selected as number)
         : 12,
     placeholderIndex:
-      Number.isInteger(saved.placeholderIndex) &&
-      (saved.placeholderIndex as number) >= 0 &&
-      (saved.placeholderIndex as number) < TILE_COUNT
-        ? (saved.placeholderIndex as number)
-        : flattestCorner(elevation),
-    placeholderPuzzle:
-      Number.isInteger(saved.placeholderPuzzle) &&
-      (saved.placeholderPuzzle as number) >= 0 &&
-      (saved.placeholderPuzzle as number) < puzzleCount
-        ? (saved.placeholderPuzzle as number)
-        : 0,
+      legacyPlaceholder,
+    placeholderIndices,
     elevation,
     puzzleRows,
     puzzleColumns,
@@ -1237,7 +1242,7 @@ export default function Home() {
     [placeholderIndex, setPlaceholderIndex] = useState(() =>
       flattestCorner(DEFAULT_ELEVATION),
     ),
-    [placeholderPuzzle, setPlaceholderPuzzle] = useState(0),
+    [placeholderIndices, setPlaceholderIndices] = useState(() => [flattestCorner(DEFAULT_ELEVATION)]),
     [lat, setLat] = useState("30.85274"),
     [lon, setLon] = useState("34.78200"),
     [span, setSpan] = useState("10"),
@@ -1262,7 +1267,7 @@ export default function Home() {
     },
     selectedRow = Math.floor(selected / COLS) + 1,
     selectedCol = (selected % COLS) + 1,
-    selectedPlaceholder = placeholderPuzzle === activePuzzle && placeholderIndex === selected,
+    selectedPlaceholder = placeholderIndices[activePuzzle] === selected,
     activePuzzleRow = Math.floor(activePuzzle / puzzleColumns) + 1,
     activePuzzleColumn = (activePuzzle % puzzleColumns) + 1,
     joinedPuzzleCount = puzzleRows * puzzleColumns,
@@ -1284,7 +1289,7 @@ export default function Home() {
         terrainSpanKm,
         selected,
         placeholderIndex,
-        placeholderPuzzle,
+        placeholderIndices,
         elevation,
         puzzleRows,
         puzzleColumns,
@@ -1298,7 +1303,7 @@ export default function Home() {
         lat,
         lon,
         placeholderIndex,
-        placeholderPuzzle,
+        placeholderIndices,
         puzzleName,
         selected,
         activePuzzle,
@@ -1323,8 +1328,8 @@ export default function Home() {
       setPuzzleColumns(saved.puzzleColumns ?? 1);
       setActivePuzzle(saved.activePuzzle ?? 0);
       setSelected(saved.selected);
-      setPlaceholderIndex(saved.placeholderIndex);
-      setPlaceholderPuzzle(saved.placeholderPuzzle ?? 0);
+      setPlaceholderIndex(saved.placeholderIndex ?? 12);
+      setPlaceholderIndices(saved.placeholderIndices ?? [saved.placeholderIndex ?? 12]);
       setElevation(saved.elevation);
       setJoinedElevations(saved.joinedElevations ?? [saved.elevation]);
       setStatus(message);
@@ -1517,8 +1522,9 @@ export default function Home() {
       setElevationDatumM(low);
       setTerrainSpanKm(kilometres);
       setPlaceholderIndex(flattestCorner(boards[0]));
+      setPlaceholderIndices(boards.map((boardElevation) => flattestCorner(boardElevation)));
       setStatus(
-        `Continuous terrain loaded: ${Math.round(low)}–${Math.round(high)} m across ${puzzleRows} × ${puzzleColumns} joined puzzle${puzzleRows * puzzleColumns > 1 ? "s" : ""}. Shared edges use the same elevation samples.`,
+        `Continuous terrain loaded: ${Math.round(low)}–${Math.round(high)} m across ${puzzleRows} × ${puzzleColumns} joined puzzle${puzzleRows * puzzleColumns > 1 ? "s" : ""}. Each board has its own placeholder; shared edges use the same elevation samples.`,
       );
     } catch (error) {
       setStatus(
@@ -1532,7 +1538,11 @@ export default function Home() {
       return;
     }
     setPlaceholderIndex(selected);
-    setPlaceholderPuzzle(activePuzzle);
+    setPlaceholderIndices((current) =>
+      Array.from({ length: joinedPuzzleCount }, (_, index) =>
+        index === activePuzzle ? selected : current[index] ?? flattestCorner(elevation),
+      ),
+    );
     setStatus(
       `Placeholder moved to puzzle ${activePuzzleRow}.${activePuzzleColumn}, tile ${selectedRow}.${selectedCol}. Its צ stays 1 mm above this tile's highest terrain.`,
     );
@@ -1561,8 +1571,10 @@ export default function Home() {
     setActivePuzzle(0);
     setJoinedElevations(Array.from({ length: boardCount }, () => DEFAULT_ELEVATION));
     setElevation(DEFAULT_ELEVATION);
-    setPlaceholderPuzzle(0);
     setPlaceholderIndex(flattestCorner(DEFAULT_ELEVATION));
+    setPlaceholderIndices(
+      Array.from({ length: boardCount }, () => flattestCorner(DEFAULT_ELEVATION)),
+    );
     setStatus(`Joined layout set to ${rows} × ${columns}. Fetch terrain to make one continuous map across all ${boardCount} board${boardCount > 1 ? "s" : ""}.`);
   }
   async function writeProjectToFolder(
@@ -1691,7 +1703,7 @@ export default function Home() {
   ) {
     const boardRow = Math.floor(boardIndex / puzzleColumns) + 1,
       boardColumn = (boardIndex % puzzleColumns) + 1,
-      isPlaceholder = placeholderPuzzle === boardIndex && placeholderIndex === index && Boolean(placeholder),
+      isPlaceholder = placeholderIndices[boardIndex] === index && Boolean(placeholder),
       row = Math.floor(index / COLS),
       col = index % COLS,
       source = isPlaceholder ? placeholder : tile,
@@ -1981,7 +1993,7 @@ export default function Home() {
             <div>
               <p className="eyebrow">TILE LAYOUT</p>
               <h2>Choose the marker tile · board {activePuzzleRow}.{activePuzzleColumn}</h2>
-              <p>Choose a joined board, then click a tile to move the one fixed placeholder.</p>
+              <p>Each board has one fixed placeholder. Choose a board, then click a tile to move its placeholder.</p>
             </div>
             <div className="legend">
               <i></i> puzzle tile <b>צ</b> placeholder
@@ -2001,7 +2013,7 @@ export default function Home() {
                   onClick={() => choosePuzzle(index)}
                 >
                   Board {Math.floor(index / puzzleColumns) + 1}.{(index % puzzleColumns) + 1}
-                  {placeholderPuzzle === index ? " · צ" : ""}
+                  {placeholderIndices[index] !== undefined ? " · צ" : ""}
                 </button>
               ))}
             </div>
@@ -2018,7 +2030,7 @@ export default function Home() {
                     key={i}
                     index={i}
                     selected={i === selected}
-                    placeholder={placeholderPuzzle === activePuzzle && placeholderIndex === i}
+                    placeholder={placeholderIndices[activePuzzle] === i}
                     values={elevation}
                     onClick={() => setSelected(i)}
                   />
