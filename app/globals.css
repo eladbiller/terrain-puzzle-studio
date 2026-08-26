@@ -933,6 +933,10 @@ header {
   background: #e7b75e;
   color: #183c3a;
 }
+.download.regular {
+  background: #dceee8;
+  color: #0b5149;
+}
 .placeholderToggle {
   margin-top: 7px;
   color: #6d4a00;

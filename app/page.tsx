@@ -631,6 +631,69 @@ function terrainBoardTriangles(
     }
   return tris;
 }
+
+// A joined-map board can also be printed as one ordinary terrain slab. It
+// deliberately uses the same outer size, terrain base, and edge samples as a
+// puzzle board, but has no tile seams, teeth, or marker.
+function regularTopographyTriangles(
+  values: number[],
+  bounds: Bounds,
+  relief: number,
+) {
+  const width = bounds.maxX - bounds.minX,
+    depth = bounds.maxY - bounds.minY,
+    support = bounds.maxZ - 0.25,
+    floor = bounds.minZ,
+    terrainBase = support + 0.22,
+    point = (x: number, y: number, bottom = false) => [
+      bounds.minX + (width * x) / GRID,
+      bounds.minY + (depth * y) / GRID,
+      bottom
+        ? floor
+        : terrainBase +
+          sampleBoardTerrain(
+            values,
+            (x / GRID) * BOARD_TERRAIN_SIZE_MM,
+            (y / GRID) * BOARD_TERRAIN_SIZE_MM,
+          ) *
+            relief,
+    ],
+    tris: number[][] = [],
+    add = (a: number[], b: number[], c: number[]) => tris.push([...a, ...b, ...c]);
+
+  for (let y = 0; y < GRID; y += 1)
+    for (let x = 0; x < GRID; x += 1) {
+      const a = point(x, y),
+        b = point(x + 1, y),
+        c = point(x + 1, y + 1),
+        d = point(x, y + 1),
+        ab = point(x, y, true),
+        bb = point(x + 1, y, true),
+        cb = point(x + 1, y + 1, true),
+        db = point(x, y + 1, true);
+      add(a, b, c);
+      add(a, c, d);
+      add(ab, cb, bb);
+      add(ab, db, cb);
+      if (y === 0) {
+        add(ab, b, bb);
+        add(ab, a, b);
+      }
+      if (y === GRID - 1) {
+        add(db, cb, c);
+        add(db, c, d);
+      }
+      if (x === 0) {
+        add(ab, db, d);
+        add(ab, d, a);
+      }
+      if (x === GRID - 1) {
+        add(bb, c, cb);
+        add(bb, b, c);
+      }
+    }
+  return tris;
+}
 function fileStem(name: string) {
   const cleaned = name
     .trim()
@@ -1827,6 +1890,21 @@ export default function Home() {
       data: binaryStl([...readTriangles(board.data), ...terrain]),
     };
   }
+  function regularTopographyExport(
+    boardIndex = activePuzzle,
+    boardElevation = elevation,
+  ) {
+    if (!board) {
+      setStatus("The built-in board needs to finish loading before this terrain model can be created.");
+      return null;
+    }
+    return {
+      fileName: `${fileStem(puzzleName)}-puzzle-r${Math.floor(boardIndex / puzzleColumns) + 1}-c${(boardIndex % puzzleColumns) + 1}-regular-topography.stl`,
+      data: binaryStl(
+        regularTopographyTriangles(boardElevation, board.bounds, effectiveRelief),
+      ),
+    };
+  }
   function exportBoard() {
     if (!board) {
       setStatus("Load board.stl first to export the complete terrain board.");
@@ -1861,6 +1939,43 @@ export default function Home() {
     setStatus(
       savedToFolder
         ? `Combined terrain board saved to “${folder.name}”.`
+        : "That folder could not be used. Choose it again and try the export once more.",
+    );
+  }
+  function exportRegularTopography() {
+    if (!board) {
+      setStatus("The built-in board needs to finish loading before this terrain model can be created.");
+      return;
+    }
+    if (!browserCanChooseFolder()) {
+      setStatus("Creating the regular topography model…");
+      window.setTimeout(() => {
+        const exported = regularTopographyExport();
+        if (!exported) return;
+        try {
+          stageDownload(exported.fileName, exported.data);
+          setStatus("The regular topography model is ready. Click “Save STL file” below to finish downloading it.");
+        } catch {
+          setStatus("The regular topography model could not be created. Try fetching the terrain again.");
+        }
+      }, 30);
+      return;
+    }
+    void exportRegularTopographyToSelectedFolder();
+  }
+  async function exportRegularTopographyToSelectedFolder() {
+    const folder = await folderForStlExport();
+    if (folder === undefined) return;
+    if (!folder) {
+      setStatus("The folder could not be opened. Try the export again and choose a folder.");
+      return;
+    }
+    const exported = regularTopographyExport();
+    if (!exported) return;
+    const savedToFolder = await saveStlFile(exported.fileName, exported.data, folder);
+    setStatus(
+      savedToFolder
+        ? `Regular topography model saved to “${folder.name}”.`
         : "That folder could not be used. Choose it again and try the export once more.",
     );
   }
@@ -2178,6 +2293,14 @@ export default function Home() {
                 ? "Download combined terrain board"
                 : "Load board STL to export board terrain"}
             </button>
+            <button
+              className="download regular"
+              type="button"
+              onClick={exportRegularTopography}
+              disabled={!board}
+            >
+              Download this board as regular topography
+            </button>
           </div>
           {readyDownload && (
             <a
@@ -2192,6 +2315,11 @@ export default function Home() {
             The board export has a fixed 5 mm terrain rim. Its 100.25 × 100.25 mm
             opening leaves 0.125 mm clearance around the 100 × 100 mm tile
             surface, while the terrain height matches exactly at every tile edge.
+          </p>
+          <p className="printNote">
+            The regular-topography export is one solid terrain slab for this
+            selected board: no puzzle tile seams, teeth, or צ. Its outside edges
+            use the same terrain samples as the neighbouring puzzle boards.
           </p>
         </aside>
       </section>
