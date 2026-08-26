@@ -242,12 +242,12 @@ function validSavedProject(input: unknown): SavedProject {
   };
 }
 
-function demoElevation(resolution = GRID) {
+function demoElevation(columns = GRID, rows = columns) {
   const result: number[] = [];
-  for (let y = 0; y <= resolution; y += 1)
-    for (let x = 0; x <= resolution; x += 1) {
-      const u = x / resolution,
-        v = y / resolution;
+  for (let y = 0; y <= rows; y += 1)
+    for (let x = 0; x <= columns; x += 1) {
+      const u = x / columns,
+        v = y / rows;
       const ridge =
         Math.exp(-((u - 0.48) ** 2 * 32 + (v - 0.43) ** 2 * 6)) * 0.68;
       const shoulder =
@@ -263,6 +263,35 @@ function demoElevation(resolution = GRID) {
 }
 
 const DEFAULT_ELEVATION = demoElevation();
+
+function splitJoinedElevation(
+  samples: number[],
+  puzzleRows: number,
+  puzzleColumns: number,
+) {
+  const sampleColumns = GRID * puzzleColumns;
+  return Array.from({ length: puzzleRows * puzzleColumns }, (_, boardIndex) => {
+    const boardRow = Math.floor(boardIndex / puzzleColumns),
+      boardColumn = boardIndex % puzzleColumns,
+      result: number[] = [];
+    for (let row = 0; row <= GRID; row += 1)
+      for (let col = 0; col <= GRID; col += 1)
+        result.push(
+          samples[
+            (boardRow * GRID + row) * (sampleColumns + 1) + boardColumn * GRID + col
+          ],
+        );
+    return result;
+  });
+}
+
+function joinedDemoElevations(puzzleRows: number, puzzleColumns: number) {
+  return splitJoinedElevation(
+    demoElevation(GRID * puzzleColumns, GRID * puzzleRows),
+    puzzleRows,
+    puzzleColumns,
+  );
+}
 
 function repairElevationOutliers(values: number[], columns = GRID, rows = GRID) {
   // Elevation tiles can occasionally contain a single bad pixel. It becomes a
@@ -1500,21 +1529,7 @@ export default function Home() {
         high = Math.max(...samples),
         range = Math.max(1, high - low),
         normalized = samples.map((value) => (value - low) / range),
-        boards = Array.from({ length: puzzleRows * puzzleColumns }, (_, boardIndex) => {
-          const boardRow = Math.floor(boardIndex / puzzleColumns),
-            boardColumn = boardIndex % puzzleColumns,
-            result: number[] = [];
-          for (let row = 0; row <= GRID; row += 1)
-            for (let col = 0; col <= GRID; col += 1)
-              result.push(
-                normalized[
-                  (boardRow * GRID + row) * (sampleColumns + 1) +
-                    boardColumn * GRID +
-                    col
-                ],
-              );
-          return result;
-        });
+        boards = splitJoinedElevation(normalized, puzzleRows, puzzleColumns);
       setJoinedElevations(boards);
       setActivePuzzle(0);
       setElevation(boards[0]);
@@ -1565,17 +1580,16 @@ export default function Home() {
     });
   }
   function changeJoinedLayout(rows: number, columns: number) {
-    const boardCount = rows * columns;
+    const boardCount = rows * columns,
+      previewBoards = joinedDemoElevations(rows, columns);
     setPuzzleRows(rows);
     setPuzzleColumns(columns);
     setActivePuzzle(0);
-    setJoinedElevations(Array.from({ length: boardCount }, () => DEFAULT_ELEVATION));
-    setElevation(DEFAULT_ELEVATION);
-    setPlaceholderIndex(flattestCorner(DEFAULT_ELEVATION));
-    setPlaceholderIndices(
-      Array.from({ length: boardCount }, () => flattestCorner(DEFAULT_ELEVATION)),
-    );
-    setStatus(`Joined layout set to ${rows} × ${columns}. Fetch terrain to make one continuous map across all ${boardCount} board${boardCount > 1 ? "s" : ""}.`);
+    setJoinedElevations(previewBoards);
+    setElevation(previewBoards[0]);
+    setPlaceholderIndex(flattestCorner(previewBoards[0]));
+    setPlaceholderIndices(previewBoards.map((boardElevation) => flattestCorner(boardElevation)));
+    setStatus(`Joined layout set to ${rows} × ${columns}. The preview now shows one continuous terrain sample across all ${boardCount} board${boardCount > 1 ? "s" : ""}; fetch terrain to replace it with your selected map.`);
   }
   async function writeProjectToFolder(
     directory: ProjectDirectoryHandle,
