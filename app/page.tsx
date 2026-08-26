@@ -335,6 +335,13 @@ function sampleBoardTerrain(values: number[], eastMm: number, northMm: number) {
   return top * (1 - dy) + bottom * dy;
 }
 
+function previewContrast(values: number[]) {
+  const low = Math.min(...values),
+    high = Math.max(...values),
+    range = Math.max(0.0001, high - low);
+  return (value: number) => Math.max(0, Math.min(1, (value - low) / range));
+}
+
 function sampleTileTerrain(
   values: number[],
   row: number,
@@ -1020,7 +1027,8 @@ function TilePreview({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null),
     row = Math.floor(index / COLS),
-    col = index % COLS;
+    col = index % COLS,
+    contrast = useMemo(() => previewContrast(values), [values]);
   useEffect(() => {
     const el = canvas.current;
     if (!el) return;
@@ -1032,7 +1040,7 @@ function TilePreview({
     const image = context.createImageData(size, size);
     const shade = (u: number, v: number) => {
       const h = sampleTileTerrain(values, row, col, u, 1 - v),
-        n = Math.max(0, Math.min(1, h));
+        n = contrast(h);
       return [22 + n * 18, 89 + n * 70, 87 + n * 52];
     };
     for (let y = 0; y < size; y += 1)
@@ -1054,7 +1062,7 @@ function TilePreview({
       context.stroke();
     }
     context.globalAlpha = 1;
-  }, [col, row, values]);
+  }, [col, contrast, row, values]);
   return (
     <button
       className={`tile ${selected ? "selected" : ""} ${placeholder ? "placeholder" : ""}`}
@@ -1071,7 +1079,8 @@ function TilePreview({
 }
 
 function BoardRimPreview({ values }: { values: number[] }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null),
+    contrast = useMemo(() => previewContrast(values), [values]);
   useEffect(() => {
     const el = canvas.current;
     if (!el) return;
@@ -1083,15 +1092,11 @@ function BoardRimPreview({ values }: { values: number[] }) {
     const image = context.createImageData(size, size);
     for (let y = 0; y < size; y += 1)
       for (let x = 0; x < size; x += 1) {
-        const h = Math.max(
-            0,
-            Math.min(
-              1,
-              sampleBoardRimTerrain(
-                values,
-                (x / size) * BOARD_TERRAIN_SIZE_MM,
-                (1 - y / size) * BOARD_TERRAIN_SIZE_MM,
-              ),
+        const h = contrast(
+            sampleBoardRimTerrain(
+              values,
+              (x / size) * BOARD_TERRAIN_SIZE_MM,
+              (1 - y / size) * BOARD_TERRAIN_SIZE_MM,
             ),
           ),
           p = (y * size + x) * 4;
@@ -1110,7 +1115,7 @@ function BoardRimPreview({ values }: { values: number[] }) {
       context.stroke();
     }
     context.globalAlpha = 1;
-  }, [values]);
+  }, [contrast, values]);
   return <canvas ref={canvas} className="boardRimPreview" aria-hidden="true" />;
 }
 
