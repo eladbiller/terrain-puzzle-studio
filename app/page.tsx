@@ -335,7 +335,7 @@ function sampleBoardTerrain(values: number[], eastMm: number, northMm: number) {
   return top * (1 - dy) + bottom * dy;
 }
 
-function previewContrast(values: number[]) {
+function elevationBounds(values: number[]) {
   let low = Infinity,
     high = -Infinity;
   for (const value of values) {
@@ -346,7 +346,12 @@ function previewContrast(values: number[]) {
     low = 0;
     high = 1;
   }
-  const range = Math.max(0.0001, high - low);
+  return { low, high };
+}
+
+function previewContrast(values: number[]) {
+  const { low, high } = elevationBounds(values),
+    range = Math.max(0.0001, high - low);
   return (value: number) => Math.max(0, Math.min(1, (value - low) / range));
 }
 
@@ -1538,8 +1543,7 @@ export default function Home() {
           }
       }
       samples = repairElevationOutliers(samples, sampleColumns, sampleRows);
-      const low = Math.min(...samples),
-        high = Math.max(...samples),
+      const { low, high } = elevationBounds(samples),
         range = Math.max(1, high - low),
         normalized = samples.map((value) => (value - low) / range),
         boards = splitJoinedElevation(normalized, puzzleRows, puzzleColumns);
