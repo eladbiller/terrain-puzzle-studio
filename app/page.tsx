@@ -1511,7 +1511,14 @@ export default function Home() {
       longitude = Number(lon),
       kilometres = Math.max(0.1, Number(span)),
       sampleColumns = GRID * puzzleColumns,
-      sampleRows = GRID * puzzleRows;
+      sampleRows = GRID * puzzleRows,
+      // Re-fetching updates the terrain samples, not the board the user is
+      // currently editing. Clamp only in case a layout was made smaller while
+      // the fetch was in progress.
+      boardToKeep = Math.min(
+        activePuzzle,
+        Math.max(0, puzzleRows * puzzleColumns - 1),
+      );
     if (![latitude, longitude, kilometres].every(Number.isFinite)) {
       setStatus("Enter a valid latitude, longitude, and area width.");
       return;
@@ -1611,12 +1618,12 @@ export default function Home() {
         normalized = samples.map((value) => (value - low) / range),
         boards = splitJoinedElevation(normalized, puzzleRows, puzzleColumns);
       setJoinedElevations(boards);
-      setActivePuzzle(0);
-      setElevation(boards[0]);
+      setActivePuzzle(boardToKeep);
+      setElevation(boards[boardToKeep]);
       setElevationRangeM(range);
       setElevationDatumM(low);
       setTerrainSpanKm(kilometres);
-      setPlaceholderIndex(flattestCorner(boards[0]));
+      setPlaceholderIndex(flattestCorner(boards[boardToKeep]));
       setPlaceholderIndices(boards.map((boardElevation) => flattestCorner(boardElevation)));
       setStatus(
         `Continuous terrain loaded: ${Math.round(low)}–${Math.round(high)} m across ${puzzleRows} × ${puzzleColumns} joined puzzle${puzzleRows * puzzleColumns > 1 ? "s" : ""}. Each board has its own placeholder; shared edges use the same elevation samples.`,
