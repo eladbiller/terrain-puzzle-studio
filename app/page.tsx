@@ -336,9 +336,17 @@ function sampleBoardTerrain(values: number[], eastMm: number, northMm: number) {
 }
 
 function previewContrast(values: number[]) {
-  const low = Math.min(...values),
-    high = Math.max(...values),
-    range = Math.max(0.0001, high - low);
+  let low = Infinity,
+    high = -Infinity;
+  for (const value of values) {
+    if (value < low) low = value;
+    if (value > high) high = value;
+  }
+  if (!Number.isFinite(low) || !Number.isFinite(high)) {
+    low = 0;
+    high = 1;
+  }
+  const range = Math.max(0.0001, high - low);
   return (value: number) => Math.max(0, Math.min(1, (value - low) / range));
 }
 
@@ -2037,6 +2045,10 @@ export default function Home() {
               ))}
             </div>
           )}
+          <div className="status previewStatus" role="status">
+            <span></span>
+            {status}
+          </div>
           <div
             className="boardPreview"
             aria-label="Assembled board preview with 5 millimetre terrain rim"
@@ -2056,10 +2068,6 @@ export default function Home() {
                 ))}
               </div>
             </div>
-          </div>
-          <div className="status" role="status">
-            <span></span>
-            {status}
           </div>
         </section>
         <aside className="panel inspector">

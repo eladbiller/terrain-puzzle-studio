@@ -524,6 +524,13 @@ header {
   margin-top: 4px;
   flex: none;
 }
+.previewStatus {
+  margin: 0 0 13px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f5faf7;
+}
 .tileDiagram {
   height: 94px;
   margin: 18px 0;
