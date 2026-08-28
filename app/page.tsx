@@ -56,7 +56,6 @@ type SavedProject = {
   puzzleColumns?: number;
   activePuzzle?: number;
   joinedElevations?: number[][];
-  printLanguages?: string;
 };
 
 type ProjectFileHandle = {
@@ -240,10 +239,6 @@ function validSavedProject(input: unknown): SavedProject {
         ? (saved.activePuzzle as number)
         : 0,
     joinedElevations: savedBoards ?? [elevation],
-    printLanguages:
-      typeof saved.printLanguages === "string" && saved.printLanguages.trim()
-        ? saved.printLanguages
-        : "en, he",
   };
 }
 
@@ -809,283 +804,6 @@ async function elevationFromGeoTiff(
   return values;
 }
 
-type PrintablePlace = {
-  id: string;
-  latitude: number;
-  longitude: number;
-  names: { language: string; value: string }[];
-};
-
-function languageCodes(value: string) {
-  const used = new Set<string>();
-  return value
-    .split(",")
-    .map((code) => code.trim().replace(/_/g, "-"))
-    .filter((code) => /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(code))
-    .map((code) => {
-      const [primary, ...rest] = code.split("-");
-      return [primary.toLowerCase(), ...rest.map((part) =>
-        part.length === 2 || /^\d{3}$/.test(part)
-          ? part.toUpperCase()
-          : part.length === 4
-            ? `${part[0].toUpperCase()}${part.slice(1).toLowerCase()}`
-            : part.toLowerCase(),
-      )].join("-");
-    })
-    .filter((code) => {
-      if (used.has(code)) return false;
-      used.add(code);
-      return true;
-    });
-}
-
-function languageName(code: string) {
-  try {
-    return new Intl.DisplayNames(["en"], { type: "language" }).of(code) ?? code;
-  } catch {
-    return code;
-  }
-}
-
-function isRightToLeftLanguage(code: string) {
-  return ["ar", "fa", "he", "ur", "yi"].includes(code.split("-")[0]);
-}
-
-function printZoom(latitude: number, widthKm: number, heightKm: number) {
-  const desiredMetresPerPixel = (Math.max(widthKm, heightKm) * 1000) / 720,
-    worldMetresPerPixel =
-      (40075016.686 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180))) /
-      256;
-  return Math.max(6, Math.min(14, Math.round(Math.log2(worldMetresPerPixel / desiredMetresPerPixel))));
-}
-
-function PrintableMapSheet({
-  latitude,
-  longitude,
-  areaKm,
-  puzzleRows,
-  puzzleColumns,
-  puzzleName,
-  printLanguages,
-  onClose,
-}: {
-  latitude: number;
-  longitude: number;
-  areaKm: number;
-  puzzleRows: number;
-  puzzleColumns: number;
-  puzzleName: string;
-  printLanguages: string;
-  onClose: () => void;
-}) {
-  const [places, setPlaces] = useState<PrintablePlace[]>([]),
-    [placeStatus, setPlaceStatus] = useState("Loading multilingual place names…"),
-    mapWidthKm = areaKm * puzzleColumns,
-    mapHeightKm = areaKm * puzzleRows,
-    languages = useMemo(() => languageCodes(printLanguages), [printLanguages]),
-    zoom = useMemo(
-      () => printZoom(latitude, mapWidthKm, mapHeightKm),
-      [latitude, mapHeightKm, mapWidthKm],
-    ),
-    centreX = tileX(longitude, zoom),
-    centreY = tileY(latitude, zoom),
-    metresPerPixel =
-      (40075016.686 * Math.max(0.2, Math.cos((latitude * Math.PI) / 180))) /
-      (256 * 2 ** zoom),
-    selectionWidth = (mapWidthKm * 1000) / metresPerPixel,
-    selectionHeight = (mapHeightKm * 1000) / metresPerPixel,
-    tileRadius = Math.max(3, Math.ceil(Math.max(selectionWidth, selectionHeight) / 512) + 1),
-    tiles = useMemo(
-      () =>
-        Array.from(
-          { length: (tileRadius * 2 + 1) ** 2 },
-          (_, index) => {
-            const width = tileRadius * 2 + 1,
-              dx = (index % width) - tileRadius,
-              dy = Math.floor(index / width) - tileRadius,
-              tx = Math.floor(centreX) + dx,
-              ty = Math.floor(centreY) + dy;
-            return { id: `${zoom}-${tx}-${ty}`, tx, ty };
-          },
-        ),
-      [centreX, centreY, tileRadius, zoom],
-    ),
-    region = useMemo(
-      () => terrainRegion(latitude, longitude, mapWidthKm, mapHeightKm),
-      [latitude, longitude, mapHeightKm, mapWidthKm],
-    );
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadPlaces() {
-      if (!languages.length) {
-        setPlaces([]);
-        setPlaceStatus("Add at least one language code to include multilingual place names.");
-        return;
-      }
-      try {
-        // OSM stores translated names as name:en, name:he, name:ar, and so on.
-        // Restrict the query to important named features so the print guide stays readable.
-        const query = `[out:json][timeout:20];(nwr["name"]["place"](${region.minLat},${region.minLon},${region.maxLat},${region.maxLon});nwr["name"]["natural"~"^(peak|water|spring)$"](${region.minLat},${region.minLon},${region.maxLat},${region.maxLon});nwr["name"]["waterway"~"^(river|stream)$"](${region.minLat},${region.minLon},${region.maxLat},${region.maxLon});nwr["name"]["historic"](${region.minLat},${region.minLon},${region.maxLat},${region.maxLon}););out center tags;`;
-        const response = await fetch("https://overpass-api.de/api/interpreter", {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=UTF-8" },
-          body: query,
-        });
-        if (!response.ok) throw new Error();
-        const payload = (await response.json()) as {
-          elements?: { id: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[];
-        };
-        const next = (payload.elements ?? [])
-          .map((element) => {
-            const itemLatitude = element.lat ?? element.center?.lat,
-              itemLongitude = element.lon ?? element.center?.lon,
-              tags = element.tags ?? {};
-            if (!Number.isFinite(itemLatitude) || !Number.isFinite(itemLongitude)) return null;
-            const names = languages
-              .map((language) => ({
-                language,
-                value:
-                  tags[`name:${language}`] ??
-                  tags[`name:${language.split("-")[0]}`],
-              }))
-              .filter(
-                (name, index, all): name is { language: string; value: string } =>
-                  Boolean(name.value) &&
-                  all.findIndex((candidate) => candidate.value === name.value) === index,
-              );
-            if (!names.length && tags.name)
-              names.push({ language: "", value: tags.name });
-            return names.length
-              ? {
-                  id: String(element.id),
-                  latitude: itemLatitude as number,
-                  longitude: itemLongitude as number,
-                  names,
-                }
-              : null;
-          })
-          .filter((place): place is PrintablePlace => Boolean(place))
-          .slice(0, 28);
-        if (cancelled) return;
-        setPlaces(next);
-        setPlaceStatus(
-          next.length
-            ? `${next.length} named places added in ${languages.map(languageName).join(", ")}.`
-            : "No translated place names were available here; the topographic map labels remain visible.",
-        );
-      } catch {
-        if (!cancelled) {
-          setPlaces([]);
-          setPlaceStatus("Could not load extra place names. The printable topographic map is still ready.");
-        }
-      }
-    }
-    void loadPlaces();
-    return () => {
-      cancelled = true;
-    };
-  }, [languages, region]);
-
-  return (
-    <div className="printMapOverlay" role="dialog" aria-modal="true" aria-label="Printable puzzle map">
-      <section className="printMapSheet">
-        <div className="printMapToolbar">
-          <span>PRINTABLE PUZZLE MAP</span>
-          <div>
-            <button type="button" onClick={() => window.print()}>
-              Print / save PDF
-            </button>
-            <button className="closePrintMap" type="button" onClick={onClose}>
-              Back to builder
-            </button>
-          </div>
-        </div>
-        <div className="printMapHeading">
-          <div>
-            <p>TOPOGRAPHIC REFERENCE · {puzzleRows} × {puzzleColumns} PUZZLE BOARD{puzzleRows * puzzleColumns > 1 ? "S" : ""}</p>
-            <h1>{puzzleName.trim() || "Terrain puzzle"}</h1>
-          </div>
-          <div className="printMapCoordinates">
-            <b>{latitude.toFixed(5)}°, {longitude.toFixed(5)}°</b>
-            <span>{mapWidthKm.toFixed(1)} × {mapHeightKm.toFixed(1)} km terrain extent</span>
-          </div>
-        </div>
-        <div className="printMapSurface">
-          {tiles.map((tile) => (
-            <img
-              key={tile.id}
-              src={`https://${["a", "b", "c"][Math.abs(tile.tx + tile.ty) % 3]}.tile.opentopomap.org/${zoom}/${tile.tx}/${tile.ty}.png`}
-              alt=""
-              style={{
-                left: `calc(50% + ${(tile.tx - centreX) * 256}px)`,
-                top: `calc(50% + ${(tile.ty - centreY) * 256}px)`,
-              }}
-            />
-          ))}
-          <div
-            className="printTileGrid"
-            style={{
-              width: selectionWidth,
-              height: selectionHeight,
-              left: `calc(50% - ${selectionWidth / 2}px)`,
-              top: `calc(50% - ${selectionHeight / 2}px)`,
-              backgroundSize: `${selectionWidth / (COLS * puzzleColumns)}px ${selectionHeight / (ROWS * puzzleRows)}px`,
-            }}
-          />
-          <div
-            className="printBoardGrid"
-            style={{
-              width: selectionWidth,
-              height: selectionHeight,
-              left: `calc(50% - ${selectionWidth / 2}px)`,
-              top: `calc(50% - ${selectionHeight / 2}px)`,
-              backgroundSize: `${selectionWidth / puzzleColumns}px ${selectionHeight / puzzleRows}px`,
-            }}
-          />
-          {places.map((place) => (
-            <div
-              className="printPlaceLabel"
-              key={place.id}
-              style={{
-                left: `calc(50% + ${(tileX(place.longitude, zoom) - centreX) * 256}px)`,
-                top: `calc(50% + ${(tileY(place.latitude, zoom) - centreY) * 256}px)`,
-              }}
-            >
-              {place.names.map((name, index) => (
-                <span
-                  key={`${name.language}-${name.value}-${index}`}
-                  lang={name.language || undefined}
-                  dir={isRightToLeftLanguage(name.language) ? "rtl" : "ltr"}
-                >
-                  {name.value}
-                </span>
-              ))}
-            </div>
-          ))}
-          <div className="northArrow"><b>N</b><i>▲</i></div>
-          <span className="printMapAttribution">© OpenTopoMap · © OpenStreetMap</span>
-        </div>
-        <div className="printMapFooter">
-          <div>
-            <b>Place-name languages</b>
-            <span>{languages.length ? languages.map(languageName).join(" · ") : "None"}</span>
-            <small>{placeStatus}</small>
-          </div>
-          <div className="printScale">
-            <i />
-            <b>{Math.max(1, Math.round(mapWidthKm / 5))} km</b>
-          </div>
-          <div className="printGridKey">
-            <b>Grid</b>
-            <span>Fine lines: 25 mm tiles · strong lines: puzzle boards</span>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function MapPicker({
   latitude,
   longitude,
@@ -1640,13 +1358,11 @@ export default function Home() {
     [span, setSpan] = useState("10"),
     [verticalModifier, setVerticalModifier] = useState("1"),
     [puzzleName, setPuzzleName] = useState("terrain-puzzle"),
-    [printLanguages, setPrintLanguages] = useState("en, he"),
     [projectFolder, setProjectFolder] = useState<ProjectDirectoryHandle | null>(null),
     [projectFolderName, setProjectFolderName] = useState(""),
     [readyDownload, setReadyDownload] = useState<{ name: string; url: string } | null>(null),
     [readyProjectSave, setReadyProjectSave] = useState<{ name: string; url: string } | null>(null),
     [viewerOpen, setViewerOpen] = useState(false),
-    [printMapOpen, setPrintMapOpen] = useState(false),
     [status, setStatus] = useState(
       "Ein Avdat / Nahal Zin preview is ready. Fetch the terrain to begin.",
     );
@@ -1678,7 +1394,6 @@ export default function Home() {
         lon,
         span,
         verticalModifier,
-        printLanguages,
         elevationRangeM,
         elevationDatumM,
         terrainSpanKm,
@@ -1705,7 +1420,6 @@ export default function Home() {
         span,
         terrainSpanKm,
         verticalModifier,
-        printLanguages,
         puzzleColumns,
         puzzleRows,
         joinedElevations,
@@ -1717,7 +1431,6 @@ export default function Home() {
       setLon(saved.lon);
       setSpan(saved.span);
       setVerticalModifier(saved.verticalModifier);
-      setPrintLanguages(saved.printLanguages ?? "en, he");
       setElevationRangeM(saved.elevationRangeM);
       setElevationDatumM(saved.elevationDatumM);
       setTerrainSpanKm(saved.terrainSpanKm);
@@ -2561,27 +2274,6 @@ export default function Home() {
               Save project file
             </a>
           )}
-          <div className="printMapExport">
-            <label>
-              Place-name languages
-              <input
-                value={printLanguages}
-                onChange={(event) => setPrintLanguages(event.target.value)}
-                placeholder="en, he, ar"
-                aria-describedby="print-language-help"
-              />
-            </label>
-            <p id="print-language-help" className="printNote">
-              Use any OpenStreetMap language codes, separated by commas. Example: en, he, ar.
-            </p>
-            <button
-              className="viewerButton printMapButton"
-              type="button"
-              onClick={() => setPrintMapOpen(true)}
-            >
-              Open printable map
-            </button>
-          </div>
           <div className="exports">
             <button
               className="download"
@@ -2644,18 +2336,6 @@ export default function Home() {
           relief={effectiveRelief}
           modifier={verticalModifier}
           onClose={() => setViewerOpen(false)}
-        />
-      )}
-      {printMapOpen && (
-        <PrintableMapSheet
-          latitude={Number(lat) || 30.85274}
-          longitude={Number(lon) || 34.782}
-          areaKm={Math.max(0.1, Number(span) || 10)}
-          puzzleRows={puzzleRows}
-          puzzleColumns={puzzleColumns}
-          puzzleName={puzzleName}
-          printLanguages={printLanguages}
-          onClose={() => setPrintMapOpen(false)}
         />
       )}
     </main>
