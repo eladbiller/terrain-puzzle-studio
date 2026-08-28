@@ -26,6 +26,7 @@ type Bounds = {
   triangles: number;
 };
 type Template = { name: string; data: ArrayBuffer; bounds: Bounds };
+type MarkerStyle = "tsadi" | "north";
 const COLS = 4,
   ROWS = 4,
   GRID = 256,
@@ -57,6 +58,7 @@ type SavedProject = {
   activePuzzle?: number;
   joinedElevations?: number[][];
   printLanguages?: string;
+  markerStyle?: MarkerStyle;
 };
 
 type ProjectFileHandle = {
@@ -244,6 +246,7 @@ function validSavedProject(input: unknown): SavedProject {
       typeof saved.printLanguages === "string" && saved.printLanguages.trim()
         ? saved.printLanguages
         : "en, he",
+    markerStyle: saved.markerStyle === "north" ? "north" : "tsadi",
   };
 }
 
@@ -544,6 +547,75 @@ function trimPlaceholderLetter(template: Template, terrainTop: number) {
         : value,
     ),
   );
+}
+
+function placeholderBaseTriangles(template: Template) {
+  // The built-in placeholder has a 25 mm tall צ extrusion. Keeping only its
+  // low base leaves the exact same 25 × 25 mm placeholder body for the N.
+  return readTriangles(template.data).filter((triangle) =>
+    triangle.every((value, index) => index % 3 !== 2 || value <= 0.001),
+  );
+}
+
+function markerPrism(
+  points: [number, number][],
+  top: number,
+  bottom = 0,
+) {
+  const tris: number[][] = [],
+    add = (a: number[], b: number[], c: number[]) => tris.push([...a, ...b, ...c]),
+    upper = points.map(([x, y]) => [x, y, top]),
+    lower = points.map(([x, y]) => [x, y, bottom]);
+  add(upper[0], upper[1], upper[2]);
+  add(upper[0], upper[2], upper[3]);
+  add(lower[0], lower[2], lower[1]);
+  add(lower[0], lower[3], lower[2]);
+  for (let index = 0; index < 4; index += 1) {
+    const next = (index + 1) % 4;
+    add(lower[index], lower[next], upper[next]);
+    add(lower[index], upper[next], upper[index]);
+  }
+  return tris;
+}
+
+function northMarkerTriangles(terrainTop: number) {
+  const stroke = 1.35,
+    halfWidth = 4.25,
+    halfHeight = 6.1,
+    top = terrainTop + 1,
+    rectangle = (x0: number, y0: number, x1: number, y1: number) =>
+      markerPrism(
+        [
+          [x0, y0],
+          [x1, y0],
+          [x1, y1],
+          [x0, y1],
+        ],
+        top,
+      ),
+    diagonal = (x0: number, y0: number, x1: number, y1: number) => {
+      const dx = x1 - x0,
+        dy = y1 - y0,
+        length = Math.hypot(dx, dy),
+        offsetX = (-dy / length) * (stroke / 2),
+        offsetY = (dx / length) * (stroke / 2);
+      return markerPrism(
+        [
+          [x0 + offsetX, y0 + offsetY],
+          [x1 + offsetX, y1 + offsetY],
+          [x1 - offsetX, y1 - offsetY],
+          [x0 - offsetX, y0 - offsetY],
+        ],
+        top,
+      );
+    };
+  // The small overlaps make one robust, slicer-friendly raised N, while the
+  // lower half of every stroke stays fused into the terrain like the original צ.
+  return [
+    ...rectangle(-halfWidth, -halfHeight, -halfWidth + stroke, halfHeight),
+    ...rectangle(halfWidth - stroke, -halfHeight, halfWidth, halfHeight),
+    ...diagonal(-halfWidth + stroke / 2, halfHeight, halfWidth - stroke / 2, -halfHeight),
+  ];
 }
 
 function terrainBoardTriangles(
@@ -1374,12 +1446,14 @@ function TilePreview({
   index,
   selected,
   placeholder,
+  markerSymbol,
   values,
   onClick,
 }: {
   index: number;
   selected: boolean;
   placeholder: boolean;
+  markerSymbol: string;
   values: number[];
   onClick: () => void;
 }) {
@@ -1431,7 +1505,7 @@ function TilePreview({
       <span className="tileTag">
         {row + 1}.{col + 1}
       </span>
-      {placeholder && <span className="placeholderTag">צ</span>}
+      {placeholder && <span className="placeholderTag">{markerSymbol}</span>}
     </button>
   );
 }
@@ -1641,6 +1715,7 @@ export default function Home() {
     [verticalModifier, setVerticalModifier] = useState("1"),
     [puzzleName, setPuzzleName] = useState("terrain-puzzle"),
     [printLanguages, setPrintLanguages] = useState("en, he"),
+    [markerStyle, setMarkerStyle] = useState<MarkerStyle>("tsadi"),
     [projectFolder, setProjectFolder] = useState<ProjectDirectoryHandle | null>(null),
     [projectFolderName, setProjectFolderName] = useState(""),
     [readyDownload, setReadyDownload] = useState<{ name: string; url: string } | null>(null),
@@ -1665,6 +1740,7 @@ export default function Home() {
     activePuzzleRow = Math.floor(activePuzzle / puzzleColumns) + 1,
     activePuzzleColumn = (activePuzzle % puzzleColumns) + 1,
     joinedPuzzleCount = puzzleRows * puzzleColumns,
+    markerSymbol = markerStyle === "north" ? "N" : "צ",
     trueScaleRelief =
       (elevationRangeM / Math.max(0.1, terrainSpanKm * 1000)) *
       BOARD_TERRAIN_SIZE_MM,
@@ -1679,6 +1755,7 @@ export default function Home() {
         span,
         verticalModifier,
         printLanguages,
+        markerStyle,
         elevationRangeM,
         elevationDatumM,
         terrainSpanKm,
@@ -1706,6 +1783,7 @@ export default function Home() {
         terrainSpanKm,
         verticalModifier,
         printLanguages,
+        markerStyle,
         puzzleColumns,
         puzzleRows,
         joinedElevations,
@@ -1718,6 +1796,7 @@ export default function Home() {
       setSpan(saved.span);
       setVerticalModifier(saved.verticalModifier);
       setPrintLanguages(saved.printLanguages ?? "en, he");
+      setMarkerStyle(saved.markerStyle ?? "tsadi");
       setElevationRangeM(saved.elevationRangeM);
       setElevationDatumM(saved.elevationDatumM);
       setTerrainSpanKm(saved.terrainSpanKm);
@@ -1933,7 +2012,7 @@ export default function Home() {
       ),
     );
     setStatus(
-      `Placeholder moved to puzzle ${activePuzzleRow}.${activePuzzleColumn}, tile ${selectedRow}.${selectedCol}. Its צ stays 1 mm above this tile's highest terrain.`,
+      `Placeholder moved to puzzle ${activePuzzleRow}.${activePuzzleColumn}, tile ${selectedRow}.${selectedCol}. Its ${markerSymbol} stays 1 mm above this tile's highest terrain.`,
     );
   }
   function choosePuzzle(index: number) {
@@ -2108,10 +2187,17 @@ export default function Home() {
       ),
       sourceTriangles =
         isPlaceholder && placeholder
-          ? trimPlaceholderLetter(
-              placeholder,
-              terrainPeak(boardElevation, row, col, effectiveRelief, 0),
-            )
+          ? markerStyle === "north"
+            ? [
+                ...placeholderBaseTriangles(placeholder),
+                ...northMarkerTriangles(
+                  terrainPeak(boardElevation, row, col, effectiveRelief, 0),
+                ),
+              ]
+            : trimPlaceholderLetter(
+                placeholder,
+                terrainPeak(boardElevation, row, col, effectiveRelief, 0),
+              )
           : source
             ? readTriangles(source.data)
             : [],
@@ -2436,7 +2522,7 @@ export default function Home() {
               <p>Each board has one fixed placeholder. Choose a board, then click a tile to move its placeholder.</p>
             </div>
             <div className="legend">
-              <i></i> puzzle tile <b>צ</b> placeholder
+              <i></i> puzzle tile <b>{markerSymbol}</b> placeholder
             </div>
           </div>
           {joinedPuzzleCount > 1 && (
@@ -2453,7 +2539,7 @@ export default function Home() {
                   onClick={() => choosePuzzle(index)}
                 >
                   Board {Math.floor(index / puzzleColumns) + 1}.{(index % puzzleColumns) + 1}
-                  {placeholderIndices[index] !== undefined ? " · צ" : ""}
+                  {placeholderIndices[index] !== undefined ? ` · ${markerSymbol}` : ""}
                 </button>
               ))}
             </div>
@@ -2475,6 +2561,7 @@ export default function Home() {
                     index={i}
                     selected={i === selected}
                     placeholder={placeholderIndices[activePuzzle] === i}
+                    markerSymbol={markerSymbol}
                     values={elevation}
                     onClick={() => setSelected(i)}
                   />
@@ -2500,7 +2587,7 @@ export default function Home() {
             </b>
             <p>
               {selectedPlaceholder
-                ? "Your 25 × 25 mm placeholder replaces this tile. The צ is trimmed to 1 mm above this tile's highest terrain."
+                ? `Your 25 × 25 mm placeholder replaces this tile. The ${markerSymbol} is 1 mm above this tile's highest terrain.`
                 : "Terrain overlaps the template top by 0.25 mm for a slicer-ready combined STL."}
             </p>
             {selectedPlaceholder ? (
@@ -2511,6 +2598,16 @@ export default function Home() {
               </button>
             )}
           </div>
+          <label>
+            Placeholder marker
+            <select
+              value={markerStyle}
+              onChange={(event) => setMarkerStyle(event.target.value as MarkerStyle)}
+            >
+              <option value="tsadi">צ — original marker</option>
+              <option value="north">N — Latin north marker</option>
+            </select>
+          </label>
           <label>
             Terrain height modifier <output>×{verticalModifier}</output>
             <select
@@ -2633,7 +2730,7 @@ export default function Home() {
           </p>
           <p className="printNote">
             The regular-topography export is one solid terrain slab for this
-            selected board: no puzzle tile seams, teeth, or צ. Its outside edges
+            selected board: no puzzle tile seams, teeth, or marker. Its outside edges
             use the same terrain samples as the neighbouring puzzle boards.
           </p>
         </aside>
